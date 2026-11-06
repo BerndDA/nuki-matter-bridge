@@ -29,7 +29,11 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     NUKI_MUTEX_RECURSIVE
     NUKI_64BIT_TIME)
 
+# nuki_hub builds these with -Werror=all removed; the library's log printf()s use
+# %d for uint32_t/enums throughout.
 target_compile_options(${COMPONENT_LIB} PRIVATE
+    -Wno-format
+    -Wno-class-memaccess  # memset() on plain-data structs with default member initializers
     -Wno-unused-function
     -Wno-missing-field-initializers
     -Wno-maybe-uninitialized

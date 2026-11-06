@@ -20,25 +20,39 @@ The lock appears as a native Matter **Door Lock** with:
 
 ## Hardware
 
-Any ESP32 with Wi‑Fi + BLE and **4 MB+ flash**: ESP32, ESP32‑S3, ESP32‑C3 or ESP32‑C6. Place it within BLE range of the lock.
+A classic **ESP32** (WROOM/WROVER dev board) with **4 MB flash** is the reference target. Place it within BLE range of the lock.
+Other chips aren't supported yet: ESP32‑C3 needs one more warning fix, and ESP32‑S3 pulls in C++20-only code via the Arduino core that conflicts with the Matter SDK.
+
+Resource budget (ESP32, current build): app image 1.85 MB of 1.94 MB OTA slot; IRAM 95 %, static DRAM 84 %.
 
 ## Build
 
-Requirements: **ESP-IDF v5.4.1+ (5.4.x)**. All other dependencies (esp_matter 1.4, arduino-esp32 3.2, esp-nimble-cpp, libsodium) come from the ESP Component Registry on the first build.
+Requirements: **ESP-IDF v5.4.x** (developed with v5.4.4). Everything else (esp_matter 1.4.2, arduino-esp32 3.3.12, esp-nimble-cpp, libsodium) comes from the ESP Component Registry on the first build.
 
 ```sh
 git clone --recursive <this repo>        # or: git submodule update --init --recursive
-. $IDF_PATH/export.sh
-idf.py set-target esp32s3                # or esp32 / esp32c3 / esp32c6
-idf.py menuconfig                        # "Nuki Matter Bridge": Wi-Fi SSID/password, options
-idf.py build flash monitor
+source ./env.sh                          # activates ESP-IDF (path in env.sh; override with ESPRESSIF_ROOT)
+./build.sh esp32 menuconfig              # "Nuki Matter Bridge": Wi-Fi SSID/password, options
+./build.sh esp32                         # build
+./build.sh esp32 -p /dev/cu.usbserial-XXXX flash monitor
 ```
+
+`build.sh` keeps a separate build directory and `sdkconfig` per target under `$ESPRESSIF_ROOT/builds/`.
 
 `third_party/nuki_hub` is a submodule pinned to a known-good nuki_hub commit. `components/nuki_ble` compiles that commit's `NukiBleEsp32`, `BleScanner` and `CRC16` libraries as an ESP-IDF component, with the same compile flags nuki_hub uses.
 
+### Build quirks worked around
+
+* arduino-esp32 3.2 and esp_matter 1.4.2 have conflicting dependencies → arduino-esp32 **3.3.12**.
+* Only the Arduino `Preferences` library is compiled (`CONFIG_ARDUINO_SELECTIVE_*`).
+* arduino-esp32 adds `--wrap` linker flags for esp_matter symbols whose implementations live in its (disabled) Matter library → pass-through shims in `main/arduino_matter_wraps.cpp`.
+* The Matter SDK needs C++17 (it breaks under C++20).
+* Third-party warnings that are errors under GCC 14 (`-Wformat`, `-Wclass-memaccess` in the Nuki lib, `-Warray-bounds` in esp-nimble-cpp) are relaxed for those components only.
+* The ESP RainMaker/Insights components that the Arduino core pulls in run `git describe` and need at least one commit in the repo.
+
 ## Setup
 
-1. **Wi‑Fi.** Set the SSID and password in menuconfig, or at runtime on the serial console: `matter wifi connect <ssid> <password>`.
+1. **Wi‑Fi.** Set the SSID and password in menuconfig, or at runtime on the serial console: `matter esp wifi connect <ssid> <password>`.
 2. **Pair with the Nuki.** Hold the lock's button for 5 s until the LED ring lights up. The bridge pairs automatically (log: `paired with xx:xx:...`). It registers as a *bridge*, like nuki_hub does.
    Do not run nuki_hub, or a second bridge, against the same lock at the same time.
 3. **Commission into Matter.** On first boot the log prints the setup QR code / manual pairing code. The firmware uses the test credentials (`34970112332` / discriminator 3840) until you add your own DAC, see below. Add the device in your Matter controller. **The phone must be on the same Wi‑Fi**, because commissioning runs on‑network (BLE is used for the Nuki link).

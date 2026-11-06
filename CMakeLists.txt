@@ -12,3 +12,9 @@ idf_build_set_property(CXX_COMPILE_OPTIONS "-std=gnu++17;-Os;-DCHIP_HAVE_CONFIG_
 idf_build_set_property(C_COMPILE_OPTIONS "-Os" APPEND)
 # RISC-V targets set -Wno-format but keep flags that depend on -Wformat
 idf_build_set_property(COMPILE_OPTIONS "-Wno-format-nonliteral;-Wno-format-security" APPEND)
+
+# With BT_NIMBLE_SECURITY_ENABLE=n (as nuki_hub uses) BLE_STORE_MAX_BONDS is 0, so
+# esp-nimble-cpp declares zero-length bond arrays that GCC 14 flags. Harmless: NimBLE
+# is asked for at most 0 entries.
+idf_component_get_property(nimble_cpp_lib esp-nimble-cpp COMPONENT_LIB)
+target_compile_options(${nimble_cpp_lib} PRIVATE -Wno-error=array-bounds)

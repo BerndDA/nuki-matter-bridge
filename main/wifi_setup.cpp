@@ -21,7 +21,7 @@ static void applyLocked()
         return;
     }
     if (strlen(ssid) == 0) {
-        ESP_LOGW(TAG, "no Wi-Fi credentials. Set them in menuconfig or run: matter wifi connect <ssid> <password>");
+        ESP_LOGW(TAG, "no Wi-Fi credentials. Set them in menuconfig or run: matter esp wifi connect <ssid> <password>");
         return;
     }
 

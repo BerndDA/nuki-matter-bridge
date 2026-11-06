@@ -7,7 +7,7 @@ menu "Nuki Matter Bridge"
             Wi-Fi network to join on first boot. BLE belongs to the Nuki link, so
             Matter commissioning happens on-network (DNS-SD) and the bridge must
             already be on your Wi-Fi. Credentials can also be set at runtime from
-            the serial console: "matter wifi connect <ssid> <password>".
+            the serial console: "matter esp wifi connect <ssid> <password>".
 
     config NUKI_WIFI_PASSWORD
         string "Wi-Fi password"
@@ -56,5 +56,13 @@ menu "Nuki Matter Bridge"
         help
             Hold for 10 s: unpair from the Nuki lock and factory-reset Matter.
             GPIO0 is the BOOT button on most dev boards.
+
+    config NUKI_SIMULATE
+        bool "Simulate the Nuki lock (no BLE)"
+        default n
+        help
+            Replaces the BLE link with a simulated lock so the Matter side can be
+            commissioned and tested without a Nuki in range. Lock/unlock take ~1.5 s,
+            and the battery drains 1 % per command. For development only.
 
 endmenu

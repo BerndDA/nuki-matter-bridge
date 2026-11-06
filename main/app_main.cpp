@@ -17,6 +17,14 @@
 
 static const char *TAG = "app";
 
+// initArduino() frees the BLE controller memory unless bleInUse() says otherwise.
+// Arduino's own BLE library normally overrides this; we use esp-nimble-cpp instead.
+// (Classic BT memory is still released, which we don't need.)
+extern "C" bool bleInUse(void)
+{
+    return true;
+}
+
 static void resetButtonTask(void *)
 {
     const gpio_num_t pin = (gpio_num_t)CONFIG_NUKI_RESET_GPIO;

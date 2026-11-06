@@ -9,6 +9,7 @@
 #include <app/server/CommissioningWindowManager.h>
 #include <app/server/Server.h>
 #include <platform/CHIPDeviceLayer.h>
+#include <setup_payload/OnboardingCodesUtil.h>
 
 #include "nuki_bridge.h"
 #include "wifi_setup.h"
@@ -206,9 +207,10 @@ esp_err_t start()
     cluster::power_source::config_t psConfig;
     psConfig.status = chip::to_underlying(PowerSource::PowerSourceStatusEnum::kActive);
     strncpy(psConfig.description, "Battery", sizeof(psConfig.description) - 1);
-    psConfig.battery.bat_replaceability = chip::to_underlying(PowerSource::BatReplaceabilityEnum::kUserReplaceable);
-    cluster_t *ps = cluster::power_source::create(ep, &psConfig, CLUSTER_FLAG_SERVER,
-                                                  cluster::power_source::feature::battery::get_id());
+    psConfig.features.battery.bat_replaceability =
+        chip::to_underlying(PowerSource::BatReplaceabilityEnum::kUserReplaceable);
+    psConfig.feature_flags = cluster::power_source::feature::battery::get_id();
+    cluster_t *ps = cluster::power_source::create(ep, &psConfig, CLUSTER_FLAG_SERVER);
     cluster::power_source::attribute::create_bat_percent_remaining(ps, nullable<uint8_t>(), nullable<uint8_t>(0),
                                                                     nullable<uint8_t>(200));
 
@@ -219,6 +221,9 @@ esp_err_t start()
         ESP_LOGE(TAG, "esp_matter::start failed: %d", err);
         return err;
     }
+
+    // BLE belongs to the Nuki link, so advertise on-network discovery in the QR code.
+    PrintOnboardingCodes(chip::RendezvousInformationFlags(chip::RendezvousInformationFlag::kOnNetwork));
 
     wifi_setup::applyDefaultCredentials();
     return ESP_OK;

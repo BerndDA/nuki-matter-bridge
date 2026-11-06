@@ -1,10 +1,11 @@
 # Name,          Type, SubType,  Offset,   Size,     Flags
-# 4 MB flash. Matter + BLE + Arduino core is ~1.8 MB, so two 1.9 MB OTA slots.
+# 4 MB flash: two 1.94 MB OTA slots fill the whole chip.
+# (No "fctry" partition: we run on test credentials. A production build with a
+#  factory-data partition will need a larger flash or smaller slots.)
 esp_secure_cert, 0x3F, ,         0xd000,   0x2000,   encrypted
 nvs,             data, nvs,      0x10000,  0xC000,
-nvs_keys,        data, nvs_keys, ,         0x1000,   encrypted
-otadata,         data, ota,      ,         0x2000,
-phy_init,        data, phy,      ,         0x1000,
-ota_0,           app,  ota_0,    0x20000,  0x1E0000,
-ota_1,           app,  ota_1,    0x200000, 0x1E0000,
-fctry,           data, nvs,      0x3E0000, 0x6000,
+nvs_keys,        data, nvs_keys, 0x1C000,  0x1000,   encrypted
+otadata,         data, ota,      0x1D000,  0x2000,
+phy_init,        data, phy,      0x1F000,  0x1000,
+ota_0,           app,  ota_0,    0x20000,  0x1F0000,
+ota_1,           app,  ota_1,    0x210000, 0x1F0000,

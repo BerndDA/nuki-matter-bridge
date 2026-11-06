@@ -1,3 +1,7 @@
+#include <sdkconfig.h>
+
+#if !CONFIG_NUKI_SIMULATE  // see nuki_sim.cpp
+
 #include "nuki_bridge.h"
 
 #include <atomic>
@@ -132,8 +136,15 @@ void executeCommand(BridgeLockCommand cmd)
     s_stateDirty = true;
 }
 
+// The library logs "Not paired" (tag NukiBle, error level) on every pairing poll.
+void setLibLogging(bool quiet)
+{
+    esp_log_level_set("NukiBle", quiet ? ESP_LOG_NONE : ESP_LOG_WARN);
+}
+
 void onPaired()
 {
+    setLibLogging(false);
     s_paired = true;
     s_scanner->whitelist(s_lock->getBleAddress());
     s_lock->setEventHandler(&s_eventHandler);
@@ -159,6 +170,7 @@ void task(void *)
         ESP_LOGI(TAG, "using stored pairing with %s", s_lock->getBleAddress().toString().c_str());
         onPaired();
     } else {
+        setLibLogging(true);
         ESP_LOGW(TAG, "not paired - press the lock's button for 5 s to enter pairing mode");
     }
 
@@ -171,6 +183,7 @@ void task(void *)
         if (s_unpairRequested.exchange(false)) {
             s_lock->unPairNuki();
             s_paired = false;
+            setLibLogging(true);
             ESP_LOGW(TAG, "unpaired from lock");
         }
 
@@ -232,3 +245,5 @@ void unpair()
 }
 
 } // namespace nuki_bridge
+
+#endif // !CONFIG_NUKI_SIMULATE
