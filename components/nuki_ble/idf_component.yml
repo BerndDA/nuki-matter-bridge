@@ -1,0 +1,13 @@
+dependencies:
+  # Arduino core as an IDF component: NukiBleEsp32 needs Arduino.h + Preferences
+  espressif/arduino-esp32:
+    version: "~3.3.12"
+    require: public
+  # NimBLE C++ wrapper on top of ESP-IDF's NimBLE host (same commit nuki_hub uses)
+  esp-nimble-cpp:
+    git: https://github.com/h2zero/esp-nimble-cpp.git
+    version: 25af28bcad1d3c42f76bfc6e73bea3f833a4ef6d
+    require: public
+  espressif/libsodium:
+    version: "^1.0.20"
+    require: public

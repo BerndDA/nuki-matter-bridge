@@ -1,0 +1,60 @@
+menu "Nuki Matter Bridge"
+
+    config NUKI_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+            Wi-Fi network to join on first boot. BLE belongs to the Nuki link, so
+            Matter commissioning happens on-network (DNS-SD) and the bridge must
+            already be on your Wi-Fi. Credentials can also be set at runtime from
+            the serial console: "matter wifi connect <ssid> <password>".
+
+    config NUKI_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+
+    config NUKI_DEVICE_NAME
+        string "Name shown in the Nuki app for this bridge"
+        default "NukiMatter"
+
+    config NUKI_DEVICE_ID
+        int "Bridge device id presented to the lock during pairing"
+        default 2020002
+
+    config NUKI_APP_ID
+        int "Nuki app id used in lock actions (shows up in the lock's activity log)"
+        default 1
+
+    config NUKI_ENABLE_UNBOLT
+        bool "Expose the Matter 'Unbolting' feature"
+        default n
+        help
+            Off (default):  Matter Unlock -> Nuki Unlock. The door is never opened (unlatched)
+                            from Matter.
+            On:             Matter Unbolt -> Nuki Unlock, Matter Unlock -> Nuki Unlatch
+                            (opens the door). This is the Matter 1.3+ meaning of
+                            "Unlock" for locks that support unbolting. Apple Home and others
+                            will then show an extra "unlatch/open" action.
+
+    config NUKI_DOOR_SENSOR
+        bool "Expose the Nuki door sensor (Matter DoorState)"
+        default n
+        help
+            Enable if your lock has the Nuki door sensor installed and calibrated.
+
+    config NUKI_STATE_POLL_INTERVAL_S
+        int "Fallback lock state poll interval (seconds)"
+        default 600
+        help
+            The lock advertises a beacon when its state changes and the bridge reads
+            the state right away. This poll is only a safety net and also refreshes
+            the battery level.
+
+    config NUKI_RESET_GPIO
+        int "GPIO of a button for unpair/factory reset (-1 = disabled)"
+        default 0
+        help
+            Hold for 10 s: unpair from the Nuki lock and factory-reset Matter.
+            GPIO0 is the BOOT button on most dev boards.
+
+endmenu

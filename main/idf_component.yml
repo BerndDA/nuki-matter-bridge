@@ -1,0 +1,5 @@
+dependencies:
+  idf: ">=5.4.1,<5.5"
+  espressif/esp_matter:
+    version: "~1.4.2"
+    require: public
