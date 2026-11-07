@@ -12,6 +12,11 @@ esp_err_t start();
 // Thread-safe: may be called from any task (it hops onto the CHIP task).
 void publishStatus(const BridgeStatus &status);
 
+// Lock facts (serial, firmware) from the Nuki side; updates the bridged devices' Basic
+// Information and the NVS cache. Thread-safe.
+void publishInfo(const BridgeDeviceInfo &info);
+bool lastInfo(BridgeDeviceInfo &out);
+
 // Last status reported by the Nuki side. Thread-safe. Returns false before the first report.
 bool lastStatus(BridgeStatus &out);
 

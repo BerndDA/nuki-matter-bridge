@@ -248,6 +248,17 @@ std::string buildStatus()
 
     appendf(out, "\"nuki\":{\"paired\":%s,\"name\":", nuki_bridge::isPaired() ? "true" : "false");
     appendEscaped(out, CONFIG_NUKI_DEVICE_NAME);
+    BridgeDeviceInfo info;
+    if (matter_lock::lastInfo(info)) {
+        out += ",\"lockName\":";
+        appendEscaped(out, info.name);
+        out += ",\"serial\":";
+        appendEscaped(out, info.serial);
+        out += ",\"firmware\":";
+        appendEscaped(out, info.firmware);
+        out += ",\"hardware\":";
+        appendEscaped(out, info.hardware);
+    }
     out += "},";
 
     appendWifi(out);

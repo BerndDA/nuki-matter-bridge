@@ -6,6 +6,7 @@
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_ota_ops.h>
+#include <nvs.h>
 #include <esp_matter.h>
 
 #include <app/clusters/door-lock-server/door-lock-server.h>
@@ -14,6 +15,7 @@
 #include <platform/CHIPDeviceLayer.h>
 #include <setup_payload/OnboardingCodesUtil.h>
 
+#include "bridge_info_provider.h"
 #include "chip_lock.h"
 #include "nuki_bridge.h"
 #include "wifi_setup.h"
@@ -32,6 +34,38 @@ uint16_t s_lockEndpointId = 0;
 portMUX_TYPE s_snapshotMux = portMUX_INITIALIZER_UNLOCKED;
 BridgeStatus s_snapshot;
 bool s_haveSnapshot = false;
+
+// Lock facts (serial, firmware) for the bridged devices' Basic Information. Cached in NVS
+// so controllers see them right after boot, before the first BLE read.
+constexpr const char *kInfoNvsNamespace = "nuki_bridge";
+constexpr const char *kInfoNvsKey = "lock_info";
+BridgeDeviceInfo s_info;  // guarded by s_snapshotMux for cross-task reads
+uint16_t s_bridgedEndpoints[2] = {chip::kInvalidEndpointId, chip::kInvalidEndpointId};
+
+void loadCachedInfo()
+{
+    nvs_handle_t h;
+    if (nvs_open(kInfoNvsNamespace, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+    BridgeDeviceInfo info;
+    size_t len = sizeof(info);
+    if (nvs_get_blob(h, kInfoNvsKey, &info, &len) == ESP_OK && len == sizeof(info) && info.valid) {
+        s_info = info;
+    }
+    nvs_close(h);
+}
+
+void storeCachedInfo(const BridgeDeviceInfo &info)
+{
+    nvs_handle_t h;
+    if (nvs_open(kInfoNvsNamespace, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    nvs_set_blob(h, kInfoNvsKey, &info, sizeof(info));
+    nvs_commit(h);
+    nvs_close(h);
+}
 
 constexpr auto kCommissioningWindowTimeout = chip::System::Clock::Seconds16(300);
 BridgeLockState s_lastLockState = BridgeLockState::Unknown;
@@ -274,8 +308,44 @@ void setString(endpoint_t *ep, uint32_t clusterId, uint32_t attrId, char *value)
 
 // A lock as a bridged device below the aggregator. Apple Home names bridged devices by
 // their NodeLabel; plain endpoints of one device all appear as "Matter Accessory".
+// Manufacturer info of a bridged lock. Strings are copied by esp_matter; the max lengths
+// (Matter spec limits) leave room for the real values arriving later via publishInfo().
+void createInfoAttributes(cluster_t *bdbi, const char *productName)
+{
+    using namespace BridgedDeviceBasicInformation::Attributes;
+    auto str = [](const char *s) { return esp_matter_char_str(const_cast<char *>(s), strlen(s)); };
+    attribute::create(bdbi, VendorName::Id, ATTRIBUTE_FLAG_NONE, str("Nuki"), 32);
+    attribute::create(bdbi, ProductName::Id, ATTRIBUTE_FLAG_NONE, str(productName), 32);
+    attribute::create(bdbi, SerialNumber::Id, ATTRIBUTE_FLAG_NONE, str(s_info.serial), 32);
+    attribute::create(bdbi, SoftwareVersionString::Id, ATTRIBUTE_FLAG_NONE, str(s_info.firmware), 64);
+    attribute::create(bdbi, HardwareVersionString::Id, ATTRIBUTE_FLAG_NONE, str(s_info.hardware), 64);
+}
+
+void updateInfoAttributes(uint16_t endpointId, const BridgeDeviceInfo &info)
+{
+    using namespace BridgedDeviceBasicInformation::Attributes;
+    auto set = [endpointId](uint32_t attr, const char *s) {
+        esp_matter_attr_val_t v = esp_matter_char_str(const_cast<char *>(s), strlen(s));
+        attribute::update(endpointId, BridgedDeviceBasicInformation::Id, attr, &v);
+    };
+    set(SerialNumber::Id, info.serial);
+    set(SoftwareVersionString::Id, info.firmware);
+    set(HardwareVersionString::Id, info.hardware);
+}
+
+void applyInfoWork(intptr_t arg)
+{
+    auto *info = reinterpret_cast<BridgeDeviceInfo *>(arg);
+    for (uint16_t ep : s_bridgedEndpoints) {
+        if (ep != chip::kInvalidEndpointId) {
+            updateInfoAttributes(ep, *info);
+        }
+    }
+    delete info;
+}
+
 endpoint_t *createLockEndpoint(node_t *node, endpoint_t *aggregator, char *label, char *uniqueId,
-                               DoorLock::DlLockType type, nullable<uint8_t> initialState)
+                               const char *productName, DoorLock::DlLockType type, nullable<uint8_t> initialState)
 {
     endpoint::bridged_node::config_t bridgedCfg;
     endpoint_t *ep = endpoint::bridged_node::create(node, &bridgedCfg, ENDPOINT_FLAG_BRIDGE, nullptr);
@@ -287,6 +357,7 @@ endpoint_t *createLockEndpoint(node_t *node, endpoint_t *aggregator, char *label
     cluster::bridged_device_basic_information::attribute::create_node_label(bdbi, label, strlen(label));
     setString(ep, BridgedDeviceBasicInformation::Id, BridgedDeviceBasicInformation::Attributes::UniqueID::Id,
               uniqueId);
+    createInfoAttributes(bdbi, productName);
 
     endpoint::door_lock::config_t cfg;
     cfg.door_lock.lock_type = chip::to_underlying(type);
@@ -308,6 +379,8 @@ namespace matter_lock {
 
 esp_err_t start()
 {
+    loadCachedInfo();
+
     // Labels must stay valid until the attributes are stored, so keep them static.
     static char bridgeLabel[] = CONFIG_NUKI_MATTER_BRIDGE_LABEL;
     static char lockLabel[] = CONFIG_NUKI_MATTER_LOCK_LABEL;
@@ -332,12 +405,13 @@ esp_err_t start()
         return ESP_FAIL;
     }
 
-    endpoint_t *ep = createLockEndpoint(node, aggregator, lockLabel, lockUid, DoorLock::DlLockType::kDeadBolt,
-                                        nullable<uint8_t>());
+    endpoint_t *ep = createLockEndpoint(node, aggregator, lockLabel, lockUid, "Smart Lock",
+                                        DoorLock::DlLockType::kDeadBolt, nullable<uint8_t>());
     if (!ep) {
         return ESP_FAIL;
     }
     s_lockEndpointId = endpoint::get_id(ep);
+    s_bridgedEndpoints[0] = s_lockEndpointId;
 
     [[maybe_unused]] cluster_t *lockCluster = cluster::get(ep, DoorLock::Id);
 #if CONFIG_NUKI_ENABLE_UNBOLT
@@ -363,12 +437,14 @@ esp_err_t start()
 #if CONFIG_NUKI_OPEN_ENDPOINT
     static char openLabel[] = CONFIG_NUKI_MATTER_OPEN_LABEL;
     static char openUid[] = "nuki-" CONFIG_NUKI_DEVICE_NAME "-open";
-    endpoint_t *openEp = createLockEndpoint(node, aggregator, openLabel, openUid, DoorLock::DlLockType::kLatchBolt,
+    endpoint_t *openEp = createLockEndpoint(node, aggregator, openLabel, openUid, "Smart Lock (door opener)",
+                                            DoorLock::DlLockType::kLatchBolt,
                                             nullable<uint8_t>(chip::to_underlying(DlLockState::kLocked)));
     if (!openEp) {
         return ESP_FAIL;
     }
     s_openEndpointId = endpoint::get_id(openEp);
+    s_bridgedEndpoints[1] = s_openEndpointId;
     ESP_LOGI(TAG, "'Open' (unlatch) lock on endpoint %u", s_openEndpointId);
 #endif
 
@@ -378,11 +454,42 @@ esp_err_t start()
         return err;
     }
 
+    {
+        ChipLock lock;
+        static BridgeInfoProvider infoProvider(chip::DeviceLayer::GetDeviceInstanceInfoProvider());
+        chip::DeviceLayer::SetDeviceInstanceInfoProvider(&infoProvider);
+    }
+
     // BLE belongs to the Nuki link, so advertise on-network discovery in the QR code.
     PrintOnboardingCodes(chip::RendezvousInformationFlags(chip::RendezvousInformationFlag::kOnNetwork));
 
     wifi_setup::applyDefaultCredentials();
     return ESP_OK;
+}
+
+void publishInfo(const BridgeDeviceInfo &info)
+{
+    taskENTER_CRITICAL(&s_snapshotMux);
+    bool changed = memcmp(&s_info, &info, sizeof(info)) != 0;
+    s_info = info;
+    taskEXIT_CRITICAL(&s_snapshotMux);
+    if (!changed) {
+        return;
+    }
+    storeCachedInfo(info);
+    auto *copy = new BridgeDeviceInfo(info);
+    if (chip::DeviceLayer::PlatformMgr().ScheduleWork(applyInfoWork, reinterpret_cast<intptr_t>(copy)) !=
+        CHIP_NO_ERROR) {
+        delete copy;
+    }
+}
+
+bool lastInfo(BridgeDeviceInfo &out)
+{
+    taskENTER_CRITICAL(&s_snapshotMux);
+    out = s_info;
+    taskEXIT_CRITICAL(&s_snapshotMux);
+    return out.valid;
 }
 
 void publishStatus(const BridgeStatus &status)

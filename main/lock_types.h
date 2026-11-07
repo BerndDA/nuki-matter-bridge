@@ -29,6 +29,15 @@ enum class BridgeLockCommand : uint8_t {
     Unlatch,  // retract bolt and pull the latch (opens the door)
 };
 
+// Static facts about the lock, read once after pairing (shown as manufacturer info).
+struct BridgeDeviceInfo {
+    char serial[16] = "";    // Nuki ID, hex as in the Nuki app
+    char name[33] = "";      // name set in the Nuki app
+    char firmware[16] = "";  // e.g. "4.2.6"
+    char hardware[8] = "";   // e.g. "8.2"
+    bool valid = false;
+};
+
 struct BridgeStatus {
     BridgeLockState lock = BridgeLockState::Unknown;
     BridgeDoorState door = BridgeDoorState::NotAvailable;

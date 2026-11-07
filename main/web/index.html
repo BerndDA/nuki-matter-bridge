@@ -58,8 +58,10 @@
     <div id="lock" class="big">–</div>
     <dl style="margin-top:10px">
       <dt>Battery</dt><dd id="battery">–</dd>
-      <dt>Door</dt><dd id="door">–</dd>
+      <dt class="door">Door</dt><dd class="door" id="door">–</dd>
       <dt>Nuki</dt><dd id="nuki">–</dd>
+      <dt>Lock ID</dt><dd id="nukiId">–</dd>
+      <dt>Lock firmware</dt><dd id="nukiFw">–</dd>
     </dl>
   </section>
 
@@ -143,12 +145,19 @@ function render(s) {
     $('battery').innerHTML = `${l.battery}%` + (l.batteryCritical ? ' <span class="badge bad">critical</span>' : '');
     txt('door', l.door);
   } else {
+    txt('door', 'n/a');
     $('lock').innerHTML = '<span class="warn">No status yet</span>';
-    txt('battery', '–'); txt('door', '–');
+    txt('battery', '–');
   }
+  // Only locks with the Nuki door sensor report a door state.
+  const hasDoor = l.valid && l.door !== 'n/a';
+  document.querySelectorAll('.door').forEach(e => { e.style.display = hasDoor ? '' : 'none'; });
   $('nuki').innerHTML = esc(s.nuki.name) +
     (s.nuki.paired ? ' <span class="badge ok">paired</span>' : ' <span class="badge bad">not paired</span>') +
     (s.system.simulation ? ' <span class="badge warn">simulation</span>' : '');
+  const n = s.nuki;
+  txt('nukiId', n.serial ? n.serial + (n.lockName ? ` (${n.lockName})` : '') : '–');
+  txt('nukiFw', n.firmware ? `${n.firmware} (hardware ${n.hardware})` : '–');
 
   const m = s.matter;
   $('window').innerHTML = m.commissioningOpen ? '<span class="ok">open</span>' : 'closed';

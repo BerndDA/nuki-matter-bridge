@@ -7,6 +7,8 @@
 
 #include "nuki_bridge.h"
 
+#include <cstdio>
+
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -21,6 +23,7 @@ constexpr uint32_t kMotorTimeMs = 1500;
 
 QueueHandle_t s_cmdQueue = nullptr;
 StatusCallback s_onStatus = nullptr;
+InfoCallback s_onInfo = nullptr;
 BridgeStatus s_status;
 
 void report()
@@ -35,6 +38,15 @@ void task(void *)
 {
     vTaskDelay(pdMS_TO_TICKS(2000));  // like a first BLE read after boot
     report();
+    if (s_onInfo) {
+        BridgeDeviceInfo info;
+        snprintf(info.serial, sizeof(info.serial), "SIM00001");
+        snprintf(info.name, sizeof(info.name), "Simulated Nuki");
+        snprintf(info.firmware, sizeof(info.firmware), "0.0.0");
+        snprintf(info.hardware, sizeof(info.hardware), "0.0");
+        info.valid = true;
+        s_onInfo(info);
+    }
 
     for (;;) {
         BridgeLockCommand cmd;
@@ -69,8 +81,9 @@ void task(void *)
 
 } // namespace
 
-void start(StatusCallback onStatus)
+void start(StatusCallback onStatus, InfoCallback onInfo)
 {
+    s_onInfo = onInfo;
     ESP_LOGW(TAG, "SIMULATION MODE - no Nuki lock is used");
     s_onStatus = onStatus;
     s_status.lock = BridgeLockState::Locked;

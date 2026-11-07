@@ -5,6 +5,8 @@
 #include "nuki_bridge.h"
 
 #include <atomic>
+#include <cinttypes>
+#include <cstdio>
 
 #include <Arduino.h>
 #include <esp_log.h>
@@ -31,6 +33,8 @@ BleScanner::Scanner *s_scanner = nullptr;
 NukiLock::NukiLock *s_lock = nullptr;
 QueueHandle_t s_cmdQueue = nullptr;
 StatusCallback s_onStatus = nullptr;
+InfoCallback s_onInfo = nullptr;
+std::atomic<bool> s_infoDirty{false};  // read the lock's config (serial, firmware)
 
 std::atomic<bool> s_paired{false};
 std::atomic<bool> s_unpairRequested{false};
@@ -118,6 +122,28 @@ bool readState()
     return true;
 }
 
+bool readInfo()
+{
+    NukiLock::Config cfg;
+    Nuki::CmdResult r = s_lock->requestConfig(&cfg);
+    if (r != Nuki::CmdResult::Success) {
+        ESP_LOGW(TAG, "requestConfig failed: %d", (int)r);
+        return false;
+    }
+    BridgeDeviceInfo info;
+    snprintf(info.serial, sizeof(info.serial), "%08" PRIX32, cfg.nukiId);
+    snprintf(info.name, sizeof(info.name), "%.32s", reinterpret_cast<const char *>(cfg.name));
+    snprintf(info.firmware, sizeof(info.firmware), "%u.%u.%u", cfg.firmwareVersion[0], cfg.firmwareVersion[1],
+             cfg.firmwareVersion[2]);
+    snprintf(info.hardware, sizeof(info.hardware), "%u.%u", cfg.hardwareRevision[0], cfg.hardwareRevision[1]);
+    info.valid = true;
+    ESP_LOGI(TAG, "lock '%s' id %s firmware %s hardware %s", info.name, info.serial, info.firmware, info.hardware);
+    if (s_onInfo) {
+        s_onInfo(info);
+    }
+    return true;
+}
+
 void executeCommand(BridgeLockCommand cmd)
 {
     NukiLock::LockAction action = mapCommand(cmd);
@@ -149,6 +175,7 @@ void onPaired()
     s_scanner->whitelist(s_lock->getBleAddress());
     s_lock->setEventHandler(&s_eventHandler);
     s_stateDirty = true;
+    s_infoDirty = true;
 }
 
 void task(void *)
@@ -176,6 +203,7 @@ void task(void *)
 
     const int64_t pollIntervalUs = (int64_t)CONFIG_NUKI_STATE_POLL_INTERVAL_S * 1000000;
     int64_t nextPollUs = 0;
+    int64_t nextInfoUs = 0;
 
     for (;;) {
         s_scanner->update();
@@ -211,6 +239,12 @@ void task(void *)
             }
         }
 
+        // Once per boot/pairing; retried every few seconds if it fails.
+        if (s_infoDirty && now >= nextInfoUs) {
+            s_infoDirty = !readInfo();
+            nextInfoUs = now + (int64_t)kFailedReadRetryMs * 1000;
+        }
+
         s_lock->updateConnectionState();
         vTaskDelay(pdMS_TO_TICKS(kLoopDelayMs));
     }
@@ -218,9 +252,10 @@ void task(void *)
 
 } // namespace
 
-void start(StatusCallback onStatus)
+void start(StatusCallback onStatus, InfoCallback onInfo)
 {
     s_onStatus = onStatus;
+    s_onInfo = onInfo;
     s_cmdQueue = xQueueCreate(4, sizeof(BridgeLockCommand));
     // Pinned to the core NimBLE runs on; the Nuki lib is not thread-safe otherwise.
     xTaskCreatePinnedToCore(task, "nuki", 8192, nullptr, 5, nullptr, 0);

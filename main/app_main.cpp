@@ -65,7 +65,7 @@ extern "C" void app_main()
         return;
     }
 
-    nuki_bridge::start(matter_lock::publishStatus);
+    nuki_bridge::start(matter_lock::publishStatus, matter_lock::publishInfo);
     web_ui::start();
 
 #if CONFIG_NUKI_RESET_GPIO >= 0
