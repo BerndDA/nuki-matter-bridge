@@ -240,8 +240,14 @@ void applyStatusWork(intptr_t arg)
 
 void emberAfDoorLockClusterInitCallback(chip::EndpointId endpoint)
 {
-    // LockState starts as null (unknown) from the endpoint config until the first read.
+    // InitServer resets LockState to null. The main lock gets its state from the first Nuki
+    // read; the "Open" endpoint has no state of its own and rests in Locked.
     DoorLockServer::Instance().InitServer(endpoint);
+#if CONFIG_NUKI_OPEN_ENDPOINT
+    if (isOpenEndpoint(endpoint)) {
+        DoorLockServer::Instance().SetLockState(endpoint, DlLockState::kLocked);
+    }
+#endif
 }
 
 bool emberAfPluginDoorLockOnDoorLockCommand(chip::EndpointId endpoint, const Nullable<chip::FabricIndex> &,
@@ -530,6 +536,27 @@ esp_err_t openCommissioningWindow()
     }
     ESP_LOGI(TAG, "commissioning window opened");
     return ESP_OK;
+}
+
+int reportedLockState(bool openEndpoint)
+{
+    uint16_t ep = s_lockEndpointId;
+#if CONFIG_NUKI_OPEN_ENDPOINT
+    if (openEndpoint) {
+        ep = s_openEndpointId;
+    }
+#else
+    if (openEndpoint) {
+        return -1;
+    }
+#endif
+    ChipLock lock;
+    attribute_t *attr = attribute::get(ep, DoorLock::Id, DoorLock::Attributes::LockState::Id);
+    esp_matter_attr_val_t val = {};
+    if (!attr || attribute::get_val(attr, &val) != ESP_OK || val.val.u8 == 0xFF) {  // 0xFF = null
+        return -1;
+    }
+    return val.val.u8;
 }
 
 void factoryReset()

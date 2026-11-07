@@ -23,6 +23,10 @@ bool lastStatus(BridgeStatus &out);
 // Opens the commissioning window (DNS-SD, 5 min) if it isn't open. Thread-safe.
 esp_err_t openCommissioningWindow();
 
+// LockState attribute of the lock / "Open" endpoints as Matter reports it:
+// 0 not fully locked, 1 locked, 2 unlocked, 3 unlatched, -1 null/absent. Takes the CHIP lock.
+int reportedLockState(bool openEndpoint);
+
 void factoryReset();
 
 } // namespace matter_lock

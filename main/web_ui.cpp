@@ -167,6 +167,8 @@ void appendMatter(std::string &out)
         out += ',';
     }
 
+    appendf(out, "\"lockState\":%d,\"openState\":%d,", matter_lock::reportedLockState(false),
+            matter_lock::reportedLockState(true));
     out += "\"fabrics\":[";
     bool first = true;
     for (const auto &fabric : server.GetFabricTable()) {
