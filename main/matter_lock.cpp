@@ -313,6 +313,30 @@ void setString(endpoint_t *ep, uint32_t clusterId, uint32_t attrId, char *value)
     }
 }
 
+// Optional diagnostics on the root endpoint (General Diagnostics is always there). The values
+// come from CHIP's ESP32 DiagnosticDataProvider; it has no Wi-Fi packet/error counters, and
+// thread metrics would need CONFIG_FREERTOS_USE_TRACE_FACILITY, so those are left out.
+void addDiagnostics(node_t *node)
+{
+    endpoint_t *root = endpoint::get(node, 0);
+    if (!root) {
+        return;
+    }
+    cluster::wifi_network_diagnostics::config_t wifiCfg;
+    if (!cluster::wifi_network_diagnostics::create(root, &wifiCfg, CLUSTER_FLAG_SERVER)) {
+        ESP_LOGW(TAG, "could not add Wi-Fi Network Diagnostics");
+    }
+    cluster::software_diagnostics::config_t swCfg;
+    cluster_t *sw = cluster::software_diagnostics::create(root, &swCfg, CLUSTER_FLAG_SERVER);
+    if (sw) {
+        cluster::software_diagnostics::attribute::create_current_heap_free(sw, 0);
+        cluster::software_diagnostics::attribute::create_current_heap_used(sw, 0);
+        cluster::software_diagnostics::feature::watermarks::add(sw);  // heap high watermark + reset
+    } else {
+        ESP_LOGW(TAG, "could not add Software Diagnostics");
+    }
+}
+
 // A lock as a bridged device below the aggregator. Apple Home names bridged devices by
 // their NodeLabel; plain endpoints of one device all appear as "Matter Accessory".
 // Manufacturer info of a bridged lock. Strings are copied by esp_matter; the max lengths
@@ -401,6 +425,7 @@ esp_err_t start()
         ESP_LOGE(TAG, "failed to create node");
         return ESP_FAIL;
     }
+    addDiagnostics(node);
 
     // Endpoint IDs are assigned in creation order (esp_matter only loads its persisted
     // counter in esp_matter::start), so this order fixes: 1 = aggregator,
