@@ -5,6 +5,7 @@
 
 #include <esp_log.h>
 #include <esp_netif.h>
+#include <esp_ota_ops.h>
 #include <esp_matter.h>
 
 #include <app/clusters/door-lock-server/door-lock-server.h>
@@ -64,6 +65,19 @@ bool isOpenEndpoint(chip::EndpointId ep)
 }
 #endif
 
+// After an OTA update the new image boots as "pending verify"; the bootloader rolls back to
+// the previous one on the next reset unless it is confirmed. Reaching Wi-Fi with an IP is
+// the criterion: then the bridge can at least receive another update.
+void confirmFirmware()
+{
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
+        state == ESP_OTA_IMG_PENDING_VERIFY) {
+        esp_ota_mark_app_valid_cancel_rollback();
+        ESP_LOGI(TAG, "new firmware confirmed, rollback cancelled");
+    }
+}
+
 void onDeviceEvent(const ChipDeviceEvent *event, intptr_t)
 {
     switch (event->Type) {
@@ -76,6 +90,7 @@ void onDeviceEvent(const ChipDeviceEvent *event, intptr_t)
             esp_netif_ip_info_t ip = {};
             if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
                 ESP_LOGI(TAG, "web UI: http://" IPSTR "/", IP2STR(&ip.ip));
+                confirmFirmware();
             }
         }
         break;

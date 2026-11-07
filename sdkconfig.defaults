@@ -91,6 +91,9 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 CONFIG_COMPILER_CXX_EXCEPTIONS=n
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 
+# ---- OTA: a new image must confirm itself (Wi-Fi up) or the bootloader rolls back ----
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # ---- Size: Matter + BLE + Arduino core must fit a 1.875 MB OTA slot on 4 MB flash ----
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_NEWLIB_NANO_FORMAT=y

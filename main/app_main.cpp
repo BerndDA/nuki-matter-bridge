@@ -26,6 +26,14 @@ extern "C" bool bleInUse(void)
     return true;
 }
 
+// initArduino() would confirm a freshly OTA-updated image right away. We confirm it ourselves
+// once Wi-Fi has an IP (matter_lock.cpp: confirmFirmware), so an update that can't get on the
+// network is rolled back by the bootloader on the next reset.
+extern "C" bool verifyRollbackLater(void)
+{
+    return true;
+}
+
 static void resetButtonTask(void *)
 {
     const gpio_num_t pin = (gpio_num_t)CONFIG_NUKI_RESET_GPIO;
