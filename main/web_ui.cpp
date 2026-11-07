@@ -221,7 +221,11 @@ std::string buildStatus()
     out += ",\"built\":";
     std::string built = std::string(app->date) + " " + app->time;
     appendEscaped(out, built.c_str());
-    appendf(out, ",\"simulation\":%s", CONFIG_NUKI_SIMULATE ? "true" : "false");
+#if CONFIG_NUKI_SIMULATE  // bool Kconfig options are undefined when off
+    out += ",\"simulation\":true";
+#else
+    out += ",\"simulation\":false";
+#endif
     out += ",\"partition\":";
     appendEscaped(out, esp_ota_get_running_partition()->label);
     // newlib nano printf (CONFIG_NEWLIB_NANO_FORMAT) has no 64-bit formats: stay in 32 bit.
