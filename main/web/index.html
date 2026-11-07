@@ -18,7 +18,12 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  main { padding: 16px; }
+  /* Cards flow into columns on wide screens; the log spans the full width. */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
+          gap: 12px; align-items: start; }
+  .grid > .card { margin-bottom: 0; }
+  .wide { grid-column: 1 / -1; }
   header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 4px 0 16px; }
   h1 { font-size: 20px; margin: 0; }
   #updated { color: var(--muted); font-size: 13px; }
@@ -45,7 +50,7 @@
   #msg { min-height: 1.4em; margin-top: 10px; }
   details summary { cursor: pointer; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
   #log { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
-         max-height: 420px; overflow-y: auto; margin: 10px 0 0; padding: 8px; background: var(--bg);
+         max-height: 70vh; overflow-y: auto; margin: 10px 0 0; padding: 8px; background: var(--bg);
          border: 1px solid var(--line); border-radius: 8px; }
   .loghint { color: var(--muted); font-size: 13px; margin-top: 6px; }
   a { color: var(--accent); }
@@ -57,6 +62,7 @@
     <h1>Nuki Matter Bridge</h1>
     <span id="updated">loading…</span>
   </header>
+  <div class="grid">
 
   <section class="card">
     <h2>Lock</h2>
@@ -119,13 +125,14 @@
     </div>
     <div id="msg"></div>
   </section>
-  <section class="card">
+  <section class="card wide">
     <details id="logbox">
       <summary>Log</summary>
       <pre id="log"></pre>
-      <div class="loghint">Live log from boot on (ring buffer). Terminal: <code>make log</code> or <code>nc &lt;bridge&gt; 23</code></div>
+      <div class="loghint">Live log (ring buffer, kept across restarts and crashes). Terminal: <code>make log</code> or <code>nc &lt;bridge&gt; 23</code></div>
     </details>
   </section>
+  </div>
 </main>
 
 <script>
@@ -194,7 +201,9 @@ function render(s) {
   txt('slot', y.partition + (y.otherPartition ? ` (${y.otherPartition}: ${y.otherPartitionState})` : ''));
   txt('uptime', duration(y.uptimeS));
   txt('reset', y.resetReason);
-  txt('heap', `${(y.heapFree / 1024).toFixed(1)} KB (lowest ${(y.heapMin / 1024).toFixed(1)} KB)`);
+  txt('heap', `${(y.heapFree / 1024).toFixed(1)} KB (lowest ${(y.heapMin / 1024).toFixed(1)} KB, ` +
+              `largest block ${(y.heapLargestBlock / 1024).toFixed(1)} KB)` +
+              (y.allocFailures ? ` · ${y.allocFailures} failed allocations (last ${y.lastAllocFailSize} B)` : ''));
 }
 
 let failures = 0;
@@ -269,8 +278,17 @@ async function pollLog() {
   } catch (e) { /* bridge restarting: retry on next tick */ }
   logBusy = false;
 }
-$('logbox').addEventListener('toggle', () => {
-  if ($('logbox').open) { logPos = 0; $('log').textContent = ''; pollLog(); }
+$('logbox').addEventListener('toggle', async () => {
+  if (!$('logbox').open) return;
+  logPos = 0;
+  $('log').textContent = '';
+  try {  // tail of the previous run (kept across restarts/crashes), then the live log
+    const r = await fetch('/api/log/previous', { cache: 'no-store' });
+    const prev = await r.text();
+    if (prev) $('log').textContent = `===== last lines before the restart (${r.headers.get('X-Reset-Reason')}) =====\n` +
+                                      prev + '\n===== current run =====\n';
+  } catch (e) { /* ignore */ }
+  pollLog();
 });
 setInterval(pollLog, 2000);
 

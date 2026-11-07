@@ -7,6 +7,7 @@
 //   POST /api/nuki-unpair          forget the Nuki pairing
 //   POST /api/matter-reset         Matter factory reset (removes all controllers + Wi-Fi)
 //   GET  /api/log?from=N           log text from byte position N (header X-Log-Next)
+//   GET  /api/log/previous         last log lines before the latest restart/crash
 //   POST /api/ota                  firmware upload (raw .bin body, header X-OTA-Password)
 //
 // POSTs must carry "X-Requested-With: nuki-web". Browsers can't add that header to a
@@ -26,6 +27,7 @@
 
 #include <esp_app_desc.h>
 #include <esp_ota_ops.h>
+#include <esp_heap_caps.h>
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <esp_netif.h>
@@ -53,6 +55,40 @@ namespace web_ui {
 namespace {
 
 httpd_handle_t s_server = nullptr;
+
+// ---- memory diagnostics --------------------------------------------------------
+
+void appendf(std::string &out, const char *fmt, ...);
+
+std::atomic<uint32_t> s_allocFailures{0};
+std::atomic<uint32_t> s_lastAllocFailSize{0};
+
+// Runs inside the failing malloc (any task, possibly with locks held): no logging/allocation.
+void onAllocFailed(size_t size, uint32_t caps, const char *function)
+{
+    s_allocFailures++;
+    s_lastAllocFailSize = size;
+}
+
+// Free stack per task (bytes never used since boot). Task stacks come from the same heap,
+// so these show where stack sizes could be trimmed.
+void appendTaskStacks(std::string &out)
+{
+    static const char *const kTasks[] = {"CHIP", "nimble_host", "nuki", "httpd", "log_srv", "wifi_wd",
+                                         "reset_btn", "sys_evt", "esp_timer", "Tmr Svc", "wifi",
+                                         "matter_console", "btController", "tiT"};
+    out += ",\"stackFree\":{";
+    bool first = true;
+    for (const char *name : kTasks) {
+        TaskHandle_t t = xTaskGetHandle(name);
+        if (!t) {
+            continue;
+        }
+        appendf(out, "%s\"%s\":%u", first ? "" : ",", name, (unsigned)uxTaskGetStackHighWaterMark(t));
+        first = false;
+    }
+    out += '}';
+}
 
 // ---- JSON helpers ------------------------------------------------------------
 
@@ -261,6 +297,10 @@ std::string buildStatus()
             esp_get_minimum_free_heap_size());
     out += ",\"resetReason\":";
     appendEscaped(out, resetReasonName(esp_reset_reason()));
+    appendf(out, ",\"heapLargestBlock\":%u,\"allocFailures\":%" PRIu32 ",\"lastAllocFailSize\":%" PRIu32,
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), s_allocFailures.load(),
+            s_lastAllocFailSize.load());
+    appendTaskStacks(out);
     out += "},";
 
     BridgeStatus st;
@@ -380,6 +420,16 @@ esp_err_t handleLog(httpd_req_t *req)
         httpd_resp_set_hdr(req, "X-Log-Dropped", "1");
     }
     return httpd_resp_send(req, buf.get(), n);
+}
+
+esp_err_t handleLogPrevious(httpd_req_t *req)
+{
+    const char *text, *reason;
+    size_t len = log_buffer::previous(&text, &reason);
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Reset-Reason", reason);
+    return httpd_resp_send(req, text, len);
 }
 
 esp_err_t handleRestart(httpd_req_t *req)
@@ -563,6 +613,8 @@ esp_err_t handleOta(httpd_req_t *req)
 
 esp_err_t start()
 {
+    heap_caps_register_failed_alloc_callback(onAllocFailed);
+
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 6144;  // status building takes the CHIP lock and formats ~1 KB of JSON
     config.max_open_sockets = 3;
@@ -579,6 +631,7 @@ esp_err_t start()
         {"/", HTTP_GET, handleIndex, nullptr},
         {"/api/status", HTTP_GET, handleStatus, nullptr},
         {"/api/log", HTTP_GET, handleLog, nullptr},
+        {"/api/log/previous", HTTP_GET, handleLogPrevious, nullptr},
         {"/api/restart", HTTP_POST, handleRestart, nullptr},
         {"/api/commissioning", HTTP_POST, handleCommissioning, nullptr},
         {"/api/nuki-unpair", HTTP_POST, handleNukiUnpair, nullptr},

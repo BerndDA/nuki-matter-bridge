@@ -265,7 +265,7 @@ void start(StatusCallback onStatus, InfoCallback onInfo)
     s_onInfo = onInfo;
     s_cmdQueue = xQueueCreate(4, sizeof(BridgeLockCommand));
     // Pinned to the core NimBLE runs on; the Nuki lib is not thread-safe otherwise.
-    xTaskCreatePinnedToCore(task, "nuki", 8192, nullptr, 5, nullptr, 0);
+    xTaskCreatePinnedToCore(task, "nuki", 6144, nullptr, 5, nullptr, 0);
 }
 
 bool enqueueCommand(BridgeLockCommand cmd)

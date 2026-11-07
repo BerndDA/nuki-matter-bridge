@@ -5,7 +5,8 @@
 #include <cstdio>
 #include <cstring>
 
-#include <esp_heap_caps.h>
+#include <esp_attr.h>
+#include <esp_system.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -17,12 +18,28 @@ static const char *TAG = "logbuf";
 namespace log_buffer {
 namespace {
 
-constexpr size_t kSize = CONFIG_NUKI_LOG_BUFFER_KB * 1024;
+// RTC budget split: the tail of the previous run (kept at boot) + the live ring.
+constexpr size_t kTotal = CONFIG_NUKI_LOG_BUFFER_KB * 1024;
+constexpr size_t kPrev = kTotal / 3 < 2048 ? kTotal / 3 : 2048;
+constexpr size_t kSize = kTotal - kPrev;  // live ring
 constexpr int kPort = 23;
 constexpr size_t kMaxLine = 256;  // formatted on the logging task's stack; longer lines are cut
 
+// In RTC slow memory: costs no heap, and RTC_NOINIT keeps the content across software
+// resets, panics and watchdog resets (not power loss), so the log before a crash survives.
+constexpr uint32_t kMagic = 0x4C4F4731;  // "LOG1"
+struct RtcLog {
+    uint32_t magic;
+    uint32_t head;  // total bytes ever written; position in the ring = head % kSize
+    uint32_t prevLen;
+    uint32_t prevReason;
+    char prev[kPrev];  // last bytes before the latest restart (Matter's boot log alone would
+                       // overwrite them in the ring before anyone can read them)
+    char buf[kSize];
+};
+RTC_NOINIT_ATTR RtcLog s_rtc;
 char *s_buf = nullptr;
-uint32_t s_head = 0;  // total bytes ever written; position in the ring = s_head % kSize
+uint32_t &s_head = s_rtc.head;
 portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 vprintf_like_t s_uartVprintf = nullptr;
 
@@ -107,7 +124,16 @@ void serveClient(int sock)
     timeval tv = {.tv_sec = 5, .tv_usec = 0};
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-    static const char hello[] = "--- nuki_matter log (oldest buffered first); Ctrl+C to quit ---\n";
+    const char *prev, *reason;
+    size_t prevLen = previous(&prev, &reason);
+    if (prevLen > 0) {
+        char head[96];
+        int n = snprintf(head, sizeof(head), "===== last lines before the restart (%s) =====\n", reason);
+        if (!sendAll(sock, head, n) || !sendAll(sock, prev, prevLen)) {
+            return;
+        }
+    }
+    static const char hello[] = "\n===== current run (oldest buffered first); Ctrl+C to quit =====\n";
     if (!sendAll(sock, hello, sizeof(hello) - 1)) {
         return;
     }
@@ -175,13 +201,34 @@ void serverTask(void *)
 
 } // namespace
 
+const char *resetName(esp_reset_reason_t r)
+{
+    switch (r) {
+    case ESP_RST_SW:       return "software restart";
+    case ESP_RST_PANIC:    return "CRASH (panic)";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return "WATCHDOG";
+    case ESP_RST_EXT:      return "reset pin";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    default:               return "other";
+    }
+}
+
 void init()
 {
-    s_buf = static_cast<char *>(heap_caps_malloc(kSize, MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
-    if (!s_buf) {
-        ESP_LOGE(TAG, "no memory for a %u KB log buffer", (unsigned)(kSize / 1024));
-        return;
+    esp_reset_reason_t reason = esp_reset_reason();
+    bool keep = s_rtc.magic == kMagic && reason != ESP_RST_POWERON && reason != ESP_RST_BROWNOUT &&
+                reason != ESP_RST_UNKNOWN;
+    s_buf = s_rtc.buf;
+    s_rtc.prevLen = 0;
+    if (keep) {  // set the end of the previous run aside, then start a fresh ring
+        uint32_t pos = s_rtc.head > kPrev ? s_rtc.head - kPrev : 0;
+        s_rtc.prevLen = read(pos, s_rtc.prev, kPrev);
+        s_rtc.prevReason = reason;
     }
+    s_rtc.magic = kMagic;  // power-on: RTC content was random
+    s_rtc.head = 0;
     s_uartVprintf = esp_log_set_vprintf(logVprintf);
     chip::Logging::SetLogRedirectCallback(chipLogRedirect);
 }
@@ -215,6 +262,13 @@ size_t read(uint32_t &pos, char *out, size_t max, bool *dropped)
     pos += n;
     taskEXIT_CRITICAL(&s_mux);
     return n;
+}
+
+size_t previous(const char **text, const char **reason)
+{
+    *text = s_rtc.prev;
+    *reason = resetName(static_cast<esp_reset_reason_t>(s_rtc.prevReason));
+    return s_buf ? s_rtc.prevLen : 0;
 }
 
 uint32_t head()

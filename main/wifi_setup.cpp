@@ -106,7 +106,7 @@ void applyDefaultCredentials()
     if (status == esp_matter::lock::SUCCESS) {
         esp_matter::lock::chip_stack_unlock();
     }
-    xTaskCreate(watchdogTask, "wifi_wd", 3072, nullptr, 2, nullptr);
+    xTaskCreate(watchdogTask, "wifi_wd", 2048, nullptr, 2, nullptr);
 }
 
 } // namespace wifi_setup

@@ -18,6 +18,10 @@ void startServer();
 // meantime it jumps to the oldest available byte and sets `dropped`.
 size_t read(uint32_t &pos, char *out, size_t max, bool *dropped = nullptr);
 
+// Last log bytes from before the latest software restart / crash / watchdog reset (empty
+// after power-on). `reason` names the reset.
+size_t previous(const char **text, const char **reason);
+
 // Position just after the newest byte.
 uint32_t head();
 

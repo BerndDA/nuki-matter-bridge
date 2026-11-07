@@ -60,6 +60,8 @@ static void resetButtonTask(void *)
 extern "C" void app_main()
 {
     log_buffer::init();  // first, so the buffer has the whole boot log
+    // esp_matter logs every attribute read/write at info level; it floods the log buffer.
+    esp_log_level_set("esp_matter_attribute", ESP_LOG_WARN);
     initArduino();       // NVS, Preferences, millis()/delay() used by the Nuki library
 
     if (matter_lock::start() != ESP_OK) {
