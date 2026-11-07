@@ -8,8 +8,9 @@
 #   make log             live log over Wi-Fi (from boot on); quit with Ctrl+C
 #   make menuconfig      project options ("Nuki Matter Bridge")
 #
-# Override on the command line, e.g.:  make run PORT=/dev/cu.usbserial-0002
-#                                      make ota HOST=192.168.178.135
+# Settings (PORT, HOST, ...) come from config.local (see config.local.example) or the
+# command line, e.g.:  make run PORT=/dev/cu.usbserial-0002   make ota HOST=192.168.1.50
+# Build output: build/<target>/ (nuki_matter.bin, .elf, sdkconfig, ...)
 #
 # ┌──────────────────────────────────────────────────────────────────┐
 # │  LEAVING THE SERIAL CONSOLE (monitor):                           │
@@ -18,14 +19,16 @@
 # │  Other keys: Ctrl+T Ctrl+R = reset board, Ctrl+T Ctrl+H = help   │
 # └──────────────────────────────────────────────────────────────────┘
 
-TARGET ?= esp32
-PORT   ?= /dev/cu.usbserial-0001
-BAUD   ?= 921600
-# Matter's mDNS name of the board (its Wi-Fi MAC); the IP works as well.
-HOST   ?= C8C9A3D0E0F0.local
+-include config.local
 
-ESPRESSIF_ROOT ?= /Volumes/mac-mini-external/espressif
-BUILD_DIR := $(ESPRESSIF_ROOT)/builds/nuki_matter-$(TARGET)
+TARGET ?= esp32
+PORT   ?= /dev/ttyUSB0
+BAUD   ?= 921600
+# Network name of the bridge: Matter advertises <WIFI-MAC>.local; the IP works as well.
+HOST   ?=
+
+BUILD_DIR := build/$(TARGET)
+NEED_HOST = $(if $(HOST),,$(error Set HOST=<bridge>.local in config.local or on the command line))
 
 IDF := ./build.sh $(TARGET)
 
@@ -57,9 +60,11 @@ run:
 
 # Password comes from CONFIG_NUKI_OTA_PASSWORD in the build's sdkconfig.
 ota: build
+	$(NEED_HOST)
 	@. ./env.sh >/dev/null && python tools/ota.py $(HOST) $(BUILD_DIR)/nuki_matter.bin $(BUILD_DIR)/sdkconfig
 
 log:
+	$(NEED_HOST)
 	@nc $(HOST) 23
 
 menuconfig:
@@ -80,4 +85,4 @@ erase:
 	$(IDF) -p $(PORT) erase-flash
 
 help:
-	@sed -n '2,19p' Makefile | sed 's/^# \{0,1\}//'
+	@sed -n '2,20p' Makefile | sed 's/^# \{0,1\}//'

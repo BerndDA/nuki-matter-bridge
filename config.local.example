@@ -1,0 +1,16 @@
+# Local settings, read by both `make` and env.sh/build.sh. Copy to config.local (git-ignored)
+# and adjust. Plain KEY=value lines, no spaces around '='.
+
+# Where ESP-IDF v5.4.x lives (expects $ESPRESSIF_ROOT/esp-idf-v5.4.4, tools in $ESPRESSIF_ROOT/tools).
+# Not needed if IDF_PATH is already set in your shell.
+#ESPRESSIF_ROOT=/path/to/espressif
+
+# Optional: keep the (large, ~1.5 GB) build directories elsewhere, e.g. on an external drive.
+# build/<target> then becomes a symlink into this directory.
+#BUILD_STORAGE=/path/to/espressif/builds
+
+# Serial port of the board (make flash / monitor).
+#PORT=/dev/cu.usbserial-0001
+
+# Network name or IP of the bridge (make ota / log). Matter advertises it as <WIFI-MAC>.local.
+#HOST=AABBCCDDEEFF.local
