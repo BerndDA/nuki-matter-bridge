@@ -6,6 +6,7 @@
 //   POST /api/commissioning        open the Matter pairing window for 5 min
 //   POST /api/nuki-unpair          forget the Nuki pairing
 //   POST /api/matter-reset         Matter factory reset (removes all controllers + Wi-Fi)
+//   GET  /api/log?from=N           log text from byte position N (header X-Log-Next)
 //   POST /api/ota                  firmware upload (raw .bin body, header X-OTA-Password)
 //
 // POSTs must carry "X-Requested-With: nuki-web". Browsers can't add that header to a
@@ -17,6 +18,7 @@
 #include <cinttypes>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 
@@ -37,6 +39,7 @@
 #include <setup_payload/OnboardingCodesUtil.h>
 
 #include "chip_lock.h"
+#include "log_buffer.h"
 #include "matter_lock.h"
 #include "nuki_bridge.h"
 
@@ -220,9 +223,12 @@ std::string buildStatus()
     const esp_app_desc_t *app = esp_app_get_description();
     out += "{\"system\":{\"version\":";
     appendEscaped(out, app->version);
-    out += ",\"built\":";
-    std::string built = std::string(app->date) + " " + app->time;
-    appendEscaped(out, built.c_str());
+    // ELF SHA-256 prefix identifies the build; app->date/time only change when
+    // esp_app_desc.c happens to be recompiled, so they are misleading.
+    char elfSha[9] = {};
+    esp_app_get_elf_sha256(elfSha, sizeof(elfSha));
+    out += ",\"build\":";
+    appendEscaped(out, elfSha);
 #if CONFIG_NUKI_SIMULATE  // bool Kconfig options are undefined when off
     out += ",\"simulation\":true";
 #else
@@ -230,6 +236,25 @@ std::string buildStatus()
 #endif
     out += ",\"partition\":";
     appendEscaped(out, esp_ota_get_running_partition()->label);
+    // State of the other slot: "aborted" means the last update there was rolled back.
+    if (const esp_partition_t *other = esp_ota_get_next_update_partition(nullptr)) {
+        esp_ota_img_states_t st;
+        const char *name = "empty";
+        if (esp_ota_get_state_partition(other, &st) == ESP_OK) {
+            switch (st) {
+            case ESP_OTA_IMG_VALID:          name = "valid"; break;
+            case ESP_OTA_IMG_INVALID:        name = "invalid"; break;
+            case ESP_OTA_IMG_ABORTED:        name = "aborted (rolled back)"; break;
+            case ESP_OTA_IMG_NEW:            name = "new"; break;
+            case ESP_OTA_IMG_PENDING_VERIFY: name = "pending"; break;
+            default:                         name = "undefined"; break;
+            }
+        }
+        out += ",\"otherPartition\":";
+        appendEscaped(out, other->label);
+        out += ",\"otherPartitionState\":";
+        appendEscaped(out, name);
+    }
     // newlib nano printf (CONFIG_NEWLIB_NANO_FORMAT) has no 64-bit formats: stay in 32 bit.
     appendf(out, ",\"uptimeS\":%" PRIu32, static_cast<uint32_t>(esp_timer_get_time() / 1000000));
     appendf(out, ",\"heapFree\":%" PRIu32 ",\"heapMin\":%" PRIu32, esp_get_free_heap_size(),
@@ -328,6 +353,35 @@ esp_err_t handleStatus(httpd_req_t *req)
     return sendJson(req, json.c_str());
 }
 
+esp_err_t handleLog(httpd_req_t *req)
+{
+    uint32_t pos = 0;
+    char query[32] = {};
+    char value[16] = {};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "from", value, sizeof(value)) == ESP_OK) {
+        pos = strtoul(value, nullptr, 10);
+    }
+    // malloc, not new: with -fno-exceptions even new(std::nothrow) aborts when out of memory.
+    constexpr size_t kMax = 2048;
+    std::unique_ptr<char, decltype(&free)> buf(static_cast<char *>(malloc(kMax)), &free);
+    if (!buf) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+    }
+    bool dropped = false;
+    size_t n = log_buffer::read(pos, buf.get(), kMax, &dropped);
+    char next[16];
+    snprintf(next, sizeof(next), "%" PRIu32, pos);
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Log-Next", next);
+    httpd_resp_set_hdr(req, "X-Log-More", pos < log_buffer::head() ? "1" : "0");
+    if (dropped) {
+        httpd_resp_set_hdr(req, "X-Log-Dropped", "1");
+    }
+    return httpd_resp_send(req, buf.get(), n);
+}
+
 esp_err_t handleRestart(httpd_req_t *req)
 {
     if (!checkCsrf(req)) {
@@ -414,7 +468,12 @@ esp_err_t receiveImage(httpd_req_t *req, const esp_partition_t *target, std::str
     }
 
     constexpr size_t kChunk = 4096;
-    std::unique_ptr<char[]> buf(new char[kChunk]);
+    std::unique_ptr<char, decltype(&free)> buf(static_cast<char *>(malloc(kChunk)), &free);
+    if (!buf) {
+        esp_ota_abort(ota);
+        error = "out of memory";
+        return ESP_ERR_NO_MEM;
+    }
     size_t remaining = req->content_len;
     int timeouts = 0;
     int lastPct = -1;
@@ -481,6 +540,7 @@ esp_err_t handleOta(httpd_req_t *req)
     }
 
     ESP_LOGW(TAG, "OTA: receiving %u bytes into %s", (unsigned)req->content_len, target->label);
+    nuki_bridge::setScanningPaused(true);  // give Wi-Fi the radio for the upload
     std::string error;
     esp_err_t err = receiveImage(req, target, error);
     if (err == ESP_OK && (err = esp_ota_set_boot_partition(target)) != ESP_OK) {
@@ -488,6 +548,7 @@ esp_err_t handleOta(httpd_req_t *req)
     }
     s_otaBusy = false;
     if (err != ESP_OK) {
+        nuki_bridge::setScanningPaused(false);
         return otaFail(req, "500 Internal Server Error", error.c_str());
     }
 
@@ -506,6 +567,7 @@ esp_err_t start()
     config.stack_size = 6144;  // status building takes the CHIP lock and formats ~1 KB of JSON
     config.max_open_sockets = 3;
     config.lru_purge_enable = true;
+    config.max_uri_handlers = 10;
 
     esp_err_t err = httpd_start(&s_server, &config);
     if (err != ESP_OK) {
@@ -516,6 +578,7 @@ esp_err_t start()
     const httpd_uri_t routes[] = {
         {"/", HTTP_GET, handleIndex, nullptr},
         {"/api/status", HTTP_GET, handleStatus, nullptr},
+        {"/api/log", HTTP_GET, handleLog, nullptr},
         {"/api/restart", HTTP_POST, handleRestart, nullptr},
         {"/api/commissioning", HTTP_POST, handleCommissioning, nullptr},
         {"/api/nuki-unpair", HTTP_POST, handleNukiUnpair, nullptr},

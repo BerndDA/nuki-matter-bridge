@@ -104,6 +104,10 @@ bool isPaired()
     return true;
 }
 
+void setScanningPaused(bool)
+{
+}
+
 void unpair()
 {
     ESP_LOGW(TAG, "unpair (simulated)");

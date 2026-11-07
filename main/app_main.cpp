@@ -12,6 +12,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include "log_buffer.h"
 #include "matter_lock.h"
 #include "nuki_bridge.h"
 #include "web_ui.h"
@@ -58,7 +59,8 @@ static void resetButtonTask(void *)
 
 extern "C" void app_main()
 {
-    initArduino();  // NVS, Preferences, millis()/delay() used by the Nuki library
+    log_buffer::init();  // first, so the buffer has the whole boot log
+    initArduino();       // NVS, Preferences, millis()/delay() used by the Nuki library
 
     if (matter_lock::start() != ESP_OK) {
         ESP_LOGE(TAG, "Matter failed to start");
@@ -67,6 +69,7 @@ extern "C" void app_main()
 
     nuki_bridge::start(matter_lock::publishStatus, matter_lock::publishInfo);
     web_ui::start();
+    log_buffer::startServer();
 
 #if CONFIG_NUKI_RESET_GPIO >= 0
     xTaskCreate(resetButtonTask, "reset_btn", 3072, nullptr, 2, nullptr);

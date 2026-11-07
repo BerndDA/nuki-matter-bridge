@@ -90,6 +90,14 @@ menu "Nuki Matter Bridge"
             uploads. `make ota` reads it from the build's sdkconfig, so it never
             has to be typed. Sent in clear text over HTTP: LAN only.
 
+    config NUKI_LOG_BUFFER_KB
+        int "Log buffer size (KB)"
+        range 2 32
+        default 8
+        help
+            RAM ring buffer with the most recent log output, readable over the network
+            (`make log` / `nc <bridge> 23`, and the web page). Costs this much heap.
+
     config NUKI_RESET_GPIO
         int "GPIO of a button for unpair/factory reset (-1 = disabled)"
         default 0

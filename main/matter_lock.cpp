@@ -1,6 +1,7 @@
 #include "matter_lock.h"
 
 #include <cinttypes>
+#include <cstdlib>
 #include <cstring>
 
 #include <esp_log.h>
@@ -231,7 +232,7 @@ void applyStatusWork(intptr_t arg)
 {
     auto *st = reinterpret_cast<BridgeStatus *>(arg);
     applyStatus(*st);
-    delete st;
+    free(st);
 }
 
 } // namespace
@@ -347,7 +348,7 @@ void applyInfoWork(intptr_t arg)
             updateInfoAttributes(ep, *info);
         }
     }
-    delete info;
+    free(info);
 }
 
 endpoint_t *createLockEndpoint(node_t *node, endpoint_t *aggregator, char *label, char *uniqueId,
@@ -483,10 +484,15 @@ void publishInfo(const BridgeDeviceInfo &info)
         return;
     }
     storeCachedInfo(info);
-    auto *copy = new BridgeDeviceInfo(info);
+    // malloc, not new: without exceptions a failed new aborts; here we just drop the update.
+    auto *copy = static_cast<BridgeDeviceInfo *>(malloc(sizeof(BridgeDeviceInfo)));
+    if (!copy) {
+        return;
+    }
+    *copy = info;
     if (chip::DeviceLayer::PlatformMgr().ScheduleWork(applyInfoWork, reinterpret_cast<intptr_t>(copy)) !=
         CHIP_NO_ERROR) {
-        delete copy;
+        free(copy);
     }
 }
 
@@ -505,10 +511,14 @@ void publishStatus(const BridgeStatus &status)
     s_haveSnapshot = true;
     taskEXIT_CRITICAL(&s_snapshotMux);
 
-    auto *copy = new BridgeStatus(status);
+    auto *copy = static_cast<BridgeStatus *>(malloc(sizeof(BridgeStatus)));
+    if (!copy) {
+        return;
+    }
+    *copy = status;
     if (chip::DeviceLayer::PlatformMgr().ScheduleWork(applyStatusWork, reinterpret_cast<intptr_t>(copy)) !=
         CHIP_NO_ERROR) {
-        delete copy;
+        free(copy);
     }
 }
 

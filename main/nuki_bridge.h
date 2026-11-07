@@ -19,6 +19,10 @@ bool enqueueCommand(BridgeLockCommand cmd);
 
 bool isPaired();
 
+// Pauses BLE scanning (e.g. during a firmware upload: Wi-Fi and BLE share the radio and the
+// continuous scan slows Wi-Fi down a lot). Safe to call from any task.
+void setScanningPaused(bool paused);
+
 // Deletes stored Nuki credentials (the lock keeps the authorization entry until it
 // is removed in the Nuki app).
 void unpair();

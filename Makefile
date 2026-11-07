@@ -5,6 +5,7 @@
 #   make monitor         serial console
 #   make run             build + flash + serial console
 #   make ota             build + update over Wi-Fi (no USB needed)
+#   make log             live log over Wi-Fi (from boot on); quit with Ctrl+C
 #   make menuconfig      project options ("Nuki Matter Bridge")
 #
 # Override on the command line, e.g.:  make run PORT=/dev/cu.usbserial-0002
@@ -35,7 +36,7 @@ define EXIT_HINT
 	@echo ""
 endef
 
-.PHONY: all build flash monitor run ota menuconfig size clean fullclean erase help
+.PHONY: all build flash monitor run ota log menuconfig size clean fullclean erase help
 
 all: build
 
@@ -58,6 +59,9 @@ run:
 ota: build
 	@. ./env.sh >/dev/null && python tools/ota.py $(HOST) $(BUILD_DIR)/nuki_matter.bin $(BUILD_DIR)/sdkconfig
 
+log:
+	@nc $(HOST) 23
+
 menuconfig:
 	$(IDF) menuconfig
 
@@ -76,4 +80,4 @@ erase:
 	$(IDF) -p $(PORT) erase-flash
 
 help:
-	@sed -n '2,18p' Makefile | sed 's/^# \{0,1\}//'
+	@sed -n '2,19p' Makefile | sed 's/^# \{0,1\}//'

@@ -55,11 +55,15 @@ def main():
     with open(image_path, 'rb') as f:
         image = f.read()
 
-    try:
-        before = status(host)
-    except OSError as e:
-        sys.exit(f'Bridge not reachable at {host}: {e}')
-    print(f'Bridge at {host}: running {before["version"]} from {before["partition"]}')
+    for attempt in range(10):  # the bridge may still be booting
+        try:
+            before = status(host)
+            break
+        except OSError as e:
+            if attempt == 9:
+                sys.exit(f'Bridge not reachable at {host}: {e}')
+            time.sleep(3)
+    print(f'Bridge at {host}: running {before["version"]} (build {before.get("build", "?")}) from {before["partition"]}')
 
     req = urllib.request.Request(
         f'http://{host}/api/ota', data=ProgressReader(image), method='POST',
@@ -96,7 +100,8 @@ def main():
     if after['partition'] == before['partition']:
         sys.exit(f'Bridge is still running from {after["partition"]}: the new firmware was rolled back. '
                  'Check the serial log.')
-    print(f'Done: running {after["version"]} from {after["partition"]} (reset: {after["resetReason"]})')
+    print(f'Done: running {after["version"]} (build {after.get("build", "?")}) from {after["partition"]} '
+          f'(reset: {after["resetReason"]})')
 
 
 if __name__ == '__main__':

@@ -51,9 +51,10 @@ CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
-CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=n
+# Broadcaster is needed by esp-nimble-cpp for NimBLEBeacon (Nuki beacon parsing); peripheral is not.
 CONFIG_BT_NIMBLE_ROLE_BROADCASTER=y
-CONFIG_BT_NIMBLE_MAX_CONNECTIONS=2
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_NVS_PERSIST=y
 CONFIG_BT_NIMBLE_SECURITY_ENABLE=n
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=256
@@ -91,8 +92,22 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 CONFIG_COMPILER_CXX_EXCEPTIONS=n
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 
+# ---- RAM: the BLE build has little heap left; values follow nuki_hub's ESP32 config ----
+# The bridge is a BLE central talking to exactly one lock.
+CONFIG_BTDM_CTRL_BLE_MAX_CONN=1
+# Wi-Fi buffers: 32 dynamic RX/TX (default) could take ~50 KB heap at peak; 4/8/8 (nuki_hub)
+# made OTA uploads crawl next to continuous BLE scanning. 6/16/16 is the middle ground.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+# Endpoints 0-3 (root, aggregator, lock, opener) are all created as dynamic endpoints.
+CONFIG_ESP_MATTER_MAX_DYNAMIC_ENDPOINT_COUNT=4
+
 # ---- OTA: a new image must confirm itself (Wi-Fi up) or the bootloader rolls back ----
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# A hung task (idle starved > 5 s) resets the chip instead of only logging. Unattended device,
+# and only a reset lets the bootloader roll back a bad update.
+CONFIG_ESP_TASK_WDT_PANIC=y
 
 # ---- Size: Matter + BLE + Arduino core must fit a 1.875 MB OTA slot on 4 MB flash ----
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y

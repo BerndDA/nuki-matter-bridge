@@ -43,6 +43,11 @@
   button.danger { color: var(--bad); }
   button small { display: block; color: var(--muted); font-size: 12px; }
   #msg { min-height: 1.4em; margin-top: 10px; }
+  details summary { cursor: pointer; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  #log { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+         max-height: 420px; overflow-y: auto; margin: 10px 0 0; padding: 8px; background: var(--bg);
+         border: 1px solid var(--line); border-radius: 8px; }
+  .loghint { color: var(--muted); font-size: 13px; margin-top: 6px; }
   a { color: var(--accent); }
 </style>
 </head>
@@ -114,6 +119,13 @@
     </div>
     <div id="msg"></div>
   </section>
+  <section class="card">
+    <details id="logbox">
+      <summary>Log</summary>
+      <pre id="log"></pre>
+      <div class="loghint">Live log from boot on (ring buffer). Terminal: <code>make log</code> or <code>nc &lt;bridge&gt; 23</code></div>
+    </details>
+  </section>
 </main>
 
 <script>
@@ -178,8 +190,8 @@ function render(s) {
   txt('ip', `${w.ip || '–'} / ${w.mac || '–'}`);
 
   const y = s.system;
-  txt('fw', `${y.version} (built ${y.built})`);
-  txt('slot', y.partition);
+  txt('fw', `${y.version} (build ${y.build})`);
+  txt('slot', y.partition + (y.otherPartition ? ` (${y.otherPartition}: ${y.otherPartitionState})` : ''));
   txt('uptime', duration(y.uptimeS));
   txt('reset', y.resetReason);
   txt('heap', `${(y.heapFree / 1024).toFixed(1)} KB (lowest ${(y.heapMin / 1024).toFixed(1)} KB)`);
@@ -233,6 +245,34 @@ document.querySelectorAll('button[data-api]').forEach(b => b.addEventListener('c
   }
   setTimeout(refresh, 1000);
 }));
+
+// ---- log view (polls only while opened) ----
+let logPos = 0, logBusy = false;
+const LOG_MAX_CHARS = 200000;
+async function pollLog() {
+  if (logBusy || !$('logbox').open) return;
+  logBusy = true;
+  try {
+    let more = true;
+    while (more) {
+      const r = await fetch('/api/log?from=' + logPos, { cache: 'no-store' });
+      const text = await r.text();
+      logPos = Number(r.headers.get('X-Log-Next')) || logPos;
+      more = r.headers.get('X-Log-More') === '1' && text.length > 0;
+      const pre = $('log');
+      const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
+      if (r.headers.get('X-Log-Dropped')) pre.textContent += '\n--- [older lines dropped] ---\n';
+      if (text) pre.textContent += text;
+      if (pre.textContent.length > LOG_MAX_CHARS) pre.textContent = pre.textContent.slice(-LOG_MAX_CHARS / 2);
+      if (atBottom) pre.scrollTop = pre.scrollHeight;
+    }
+  } catch (e) { /* bridge restarting: retry on next tick */ }
+  logBusy = false;
+}
+$('logbox').addEventListener('toggle', () => {
+  if ($('logbox').open) { logPos = 0; $('log').textContent = ''; pollLog(); }
+});
+setInterval(pollLog, 2000);
 
 refresh();
 setInterval(refresh, 3000);

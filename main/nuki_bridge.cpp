@@ -38,7 +38,9 @@ std::atomic<bool> s_infoDirty{false};  // read the lock's config (serial, firmwa
 
 std::atomic<bool> s_paired{false};
 std::atomic<bool> s_unpairRequested{false};
-std::atomic<bool> s_stateDirty{true};  // read the state once at startup
+std::atomic<bool> s_stateDirty{true};
+std::atomic<bool> s_scanPauseRequested{false};
+bool s_scanPaused = false;  // applied state, Nuki task only  // read the state once at startup
 BridgeStatus s_lastStatus;
 
 // Called by the Nuki library (BLE host task) when the lock's beacon signals a
@@ -206,6 +208,11 @@ void task(void *)
     int64_t nextInfoUs = 0;
 
     for (;;) {
+        if (s_scanPauseRequested != s_scanPaused) {
+            s_scanPaused = s_scanPauseRequested;
+            s_scanner->enableScanning(!s_scanPaused);
+            ESP_LOGI(TAG, "BLE scanning %s", s_scanPaused ? "paused" : "resumed");
+        }
         s_scanner->update();
 
         if (s_unpairRequested.exchange(false)) {
@@ -272,6 +279,11 @@ bool enqueueCommand(BridgeLockCommand cmd)
 bool isPaired()
 {
     return s_paired;
+}
+
+void setScanningPaused(bool paused)
+{
+    s_scanPauseRequested = paused;
 }
 
 void unpair()
