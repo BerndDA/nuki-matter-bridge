@@ -25,6 +25,35 @@ namespace {
 uint16_t s_lockEndpointId = 0;
 BridgeLockState s_lastLockState = BridgeLockState::Unknown;
 
+#if CONFIG_NUKI_OPEN_ENDPOINT
+// Second Door Lock endpoint "Open": Unlock = Nuki unlatch. It rests in Locked, shows
+// Unlocked briefly once the Nuki has unlatched, then returns to Locked.
+// All of this runs on the CHIP task (command callbacks, applyStatus, timers).
+uint16_t s_openEndpointId = chip::kInvalidEndpointId;
+bool s_openPending = false;  // unlatch requested via this endpoint, not yet seen
+constexpr auto kOpenShowUnlocked = chip::System::Clock::Seconds32(3);
+constexpr auto kOpenTimeout = chip::System::Clock::Seconds32(30);
+
+void openRelock(chip::System::Layer *, void *)
+{
+    s_openPending = false;
+    DoorLockServer::Instance().SetLockState(s_openEndpointId, DlLockState::kLocked);
+}
+
+void openShowUnlocked()
+{
+    s_openPending = false;
+    chip::DeviceLayer::SystemLayer().CancelTimer(openRelock, nullptr);
+    DoorLockServer::Instance().SetLockState(s_openEndpointId, DlLockState::kUnlocked);
+    chip::DeviceLayer::SystemLayer().StartTimer(kOpenShowUnlocked, openRelock, nullptr);
+}
+
+bool isOpenEndpoint(chip::EndpointId ep)
+{
+    return ep == s_openEndpointId;
+}
+#endif
+
 void onDeviceEvent(const ChipDeviceEvent *event, intptr_t)
 {
     switch (event->Type) {
@@ -104,6 +133,14 @@ void applyStatus(const BridgeStatus &st)
     }
     s_lastLockState = st.lock;
 
+#if CONFIG_NUKI_OPEN_ENDPOINT
+    // Unlatched (from any source, e.g. the Nuki app) or our own request completed.
+    // Unlocked counts too: a fast Nuki can be past Unlatched before the next read.
+    if (st.lock == BridgeLockState::Unlatched || (s_openPending && st.lock == BridgeLockState::Unlocked)) {
+        openShowUnlocked();
+    }
+#endif
+
 #if CONFIG_NUKI_DOOR_SENSOR
     switch (st.door) {
     case BridgeDoorState::Open:   dls.SetDoorState(s_lockEndpointId, DoorStateEnum::kDoorOpen); break;
@@ -142,19 +179,40 @@ void emberAfDoorLockClusterInitCallback(chip::EndpointId endpoint)
     DoorLockServer::Instance().InitServer(endpoint);
 }
 
-bool emberAfPluginDoorLockOnDoorLockCommand(chip::EndpointId, const Nullable<chip::FabricIndex> &,
+bool emberAfPluginDoorLockOnDoorLockCommand(chip::EndpointId endpoint, const Nullable<chip::FabricIndex> &,
                                             const Nullable<chip::NodeId> &, const chip::Optional<chip::ByteSpan> &,
                                             OperationErrorEnum &err)
 {
+#if CONFIG_NUKI_OPEN_ENDPOINT
+    if (isOpenEndpoint(endpoint)) {  // nothing to lock: just return to the resting state
+        ESP_LOGI(TAG, "Matter: Lock on 'Open' -> no-op");
+        chip::DeviceLayer::SystemLayer().CancelTimer(openRelock, nullptr);
+        openRelock(nullptr, nullptr);
+        return true;
+    }
+#endif
     ESP_LOGI(TAG, "Matter: Lock");
     return submit(BridgeLockCommand::Lock, err);
 }
 
 // With the Unbolting feature, Matter's UnlockDoor means "unlock and pull the latch".
-bool emberAfPluginDoorLockOnDoorUnlockCommand(chip::EndpointId, const Nullable<chip::FabricIndex> &,
+bool emberAfPluginDoorLockOnDoorUnlockCommand(chip::EndpointId endpoint, const Nullable<chip::FabricIndex> &,
                                               const Nullable<chip::NodeId> &, const chip::Optional<chip::ByteSpan> &,
                                               OperationErrorEnum &err)
 {
+#if CONFIG_NUKI_OPEN_ENDPOINT
+    if (isOpenEndpoint(endpoint)) {
+        ESP_LOGI(TAG, "Matter: Unlock on 'Open' -> Nuki unlatch");
+        if (!submit(BridgeLockCommand::Unlatch, err)) {
+            return false;
+        }
+        s_openPending = true;
+        // If the Nuki never reports the unlatch, fall back to Locked.
+        chip::DeviceLayer::SystemLayer().CancelTimer(openRelock, nullptr);
+        chip::DeviceLayer::SystemLayer().StartTimer(kOpenTimeout, openRelock, nullptr);
+        return true;
+    }
+#endif
 #if CONFIG_NUKI_ENABLE_UNBOLT
     ESP_LOGI(TAG, "Matter: Unlock -> Nuki unlatch");
     return submit(BridgeLockCommand::Unlatch, err);
@@ -172,6 +230,27 @@ bool emberAfPluginDoorLockOnDoorUnboltCommand(chip::EndpointId, const Nullable<c
     return submit(BridgeLockCommand::Unlock, err);
 }
 
+namespace {
+
+endpoint_t *createLockEndpoint(node_t *node, DoorLock::DlLockType type, nullable<uint8_t> initialState)
+{
+    endpoint::door_lock::config_t cfg;
+    cfg.door_lock.lock_type = chip::to_underlying(type);
+    cfg.door_lock.lock_state = initialState;
+    cfg.door_lock.actuator_enabled = true;
+    endpoint_t *ep = endpoint::door_lock::create(node, &cfg, ENDPOINT_FLAG_NONE, nullptr);
+    if (!ep) {
+        ESP_LOGE(TAG, "failed to create door lock endpoint");
+        return nullptr;
+    }
+    // The server reads AutoRelockTime after every unlock. 0 = disabled: the Nuki's own
+    // auto-lock (configured in the Nuki app) handles relocking.
+    cluster::door_lock::attribute::create_auto_relock_time(cluster::get(ep, DoorLock::Id), 0);
+    return ep;
+}
+
+} // namespace
+
 namespace matter_lock {
 
 esp_err_t start()
@@ -183,27 +262,20 @@ esp_err_t start()
         return ESP_FAIL;
     }
 
-    endpoint::door_lock::config_t lockConfig;
-    lockConfig.door_lock.lock_type = chip::to_underlying(DoorLock::DlLockType::kDeadBolt);
-    lockConfig.door_lock.lock_state = nullable<uint8_t>();  // unknown until first read
-    lockConfig.door_lock.actuator_enabled = true;
-    endpoint_t *ep = endpoint::door_lock::create(node, &lockConfig, ENDPOINT_FLAG_NONE, nullptr);
+    // Main lock: endpoint 1. Created first so its ID stays stable.
+    endpoint_t *ep = createLockEndpoint(node, DoorLock::DlLockType::kDeadBolt, nullable<uint8_t>());
     if (!ep) {
-        ESP_LOGE(TAG, "failed to create door lock endpoint");
         return ESP_FAIL;
     }
     s_lockEndpointId = endpoint::get_id(ep);
 
-    cluster_t *lockCluster = cluster::get(ep, DoorLock::Id);
+    [[maybe_unused]] cluster_t *lockCluster = cluster::get(ep, DoorLock::Id);
 #if CONFIG_NUKI_ENABLE_UNBOLT
     cluster::door_lock::feature::unbolting::add(lockCluster);
 #endif
 #if CONFIG_NUKI_DOOR_SENSOR
     cluster::door_lock::feature::door_position_sensor::add(lockCluster);
 #endif
-    // The server reads AutoRelockTime after every unlock. 0 = disabled: the Nuki's own
-    // auto-lock (configured in the Nuki app) handles relocking.
-    cluster::door_lock::attribute::create_auto_relock_time(lockCluster, 0);
 
     // Battery reporting
     cluster::power_source::config_t psConfig;
@@ -217,6 +289,16 @@ esp_err_t start()
                                                                     nullable<uint8_t>(200));
 
     ESP_LOGI(TAG, "door lock on endpoint %u", s_lockEndpointId);
+
+#if CONFIG_NUKI_OPEN_ENDPOINT
+    endpoint_t *openEp = createLockEndpoint(node, DoorLock::DlLockType::kLatchBolt,
+                                            nullable<uint8_t>(chip::to_underlying(DlLockState::kLocked)));
+    if (!openEp) {
+        return ESP_FAIL;
+    }
+    s_openEndpointId = endpoint::get_id(openEp);
+    ESP_LOGI(TAG, "'Open' (unlatch) lock on endpoint %u", s_openEndpointId);
+#endif
 
     esp_err_t err = esp_matter::start(onDeviceEvent);
     if (err != ESP_OK) {

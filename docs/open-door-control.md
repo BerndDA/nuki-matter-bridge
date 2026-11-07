@@ -14,7 +14,11 @@ Sources:
 Plan: keep Unbolting **off** (Unlock = retract the bolt only) and add a second
 control on its own endpoint for opening the door.
 
-## Option A: second lock endpoint "Front door – Open" (preferred)
+## Option A: second lock endpoint "Front door – Open" (implemented)
+
+Implemented in `main/matter_lock.cpp` as endpoint 2 (`CONFIG_NUKI_OPEN_ENDPOINT`, default on,
+requires Unbolting off). It shows Unlocked for 3 s once the Nuki has unlatched, and also when
+the door is opened from the Nuki app. If no unlatch is seen within 30 s, it falls back to Locked.
 
 - Second Door Lock endpoint. Its `UnlockDoor` sends `Unlatch` to the Nuki. Afterwards it
   always reports `Locked` again.

@@ -33,8 +33,19 @@ menu "Nuki Matter Bridge"
                             from Matter.
             On:             Matter Unbolt -> Nuki Unlock, Matter Unlock -> Nuki Unlatch
                             (opens the door). This is the Matter 1.3+ meaning of
-                            "Unlock" for locks that support unbolting. Apple Home and others
-                            will then show an extra "unlatch/open" action.
+                            "Unlock" for locks that support unbolting. Apple Home has no
+                            separate unlatch action: its Unlock then opens the door.
+                            Prefer NUKI_OPEN_ENDPOINT.
+
+    config NUKI_OPEN_ENDPOINT
+        bool "Add a second lock endpoint that opens the door"
+        default y
+        depends on !NUKI_ENABLE_UNBOLT
+        help
+            Adds a second Door Lock endpoint ("Open"). Unlocking it unlatches the
+            Nuki (opens the door); it then reports Locked again after a few seconds.
+            Being a lock, controllers ask for authentication (Face ID/passcode)
+            like for the main lock. See docs/open-door-control.md.
 
     config NUKI_DOOR_SENSOR
         bool "Expose the Nuki door sensor (Matter DoorState)"
