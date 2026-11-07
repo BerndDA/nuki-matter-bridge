@@ -1,5 +1,6 @@
 #include "matter_lock.h"
 
+#include <cinttypes>
 #include <cstring>
 
 #include <esp_log.h>
@@ -232,15 +233,37 @@ bool emberAfPluginDoorLockOnDoorUnboltCommand(chip::EndpointId, const Nullable<c
 
 namespace {
 
-endpoint_t *createLockEndpoint(node_t *node, DoorLock::DlLockType type, nullable<uint8_t> initialState)
+void setString(endpoint_t *ep, uint32_t clusterId, uint32_t attrId, char *value)
 {
+    attribute_t *attr = attribute::get(cluster::get(ep, clusterId), attrId);
+    esp_matter_attr_val_t v = esp_matter_char_str(value, strlen(value));
+    if (!attr || attribute::set_val(attr, &v) != ESP_OK) {
+        ESP_LOGW(TAG, "could not set attribute 0x%04" PRIx32 " on endpoint %u", attrId, endpoint::get_id(ep));
+    }
+}
+
+// A lock as a bridged device below the aggregator. Apple Home names bridged devices by
+// their NodeLabel; plain endpoints of one device all appear as "Matter Accessory".
+endpoint_t *createLockEndpoint(node_t *node, endpoint_t *aggregator, char *label, char *uniqueId,
+                               DoorLock::DlLockType type, nullable<uint8_t> initialState)
+{
+    endpoint::bridged_node::config_t bridgedCfg;
+    endpoint_t *ep = endpoint::bridged_node::create(node, &bridgedCfg, ENDPOINT_FLAG_BRIDGE, nullptr);
+    if (!ep || endpoint::set_parent_endpoint(ep, aggregator) != ESP_OK) {
+        ESP_LOGE(TAG, "failed to create bridged endpoint");
+        return nullptr;
+    }
+    cluster_t *bdbi = cluster::get(ep, BridgedDeviceBasicInformation::Id);
+    cluster::bridged_device_basic_information::attribute::create_node_label(bdbi, label, strlen(label));
+    setString(ep, BridgedDeviceBasicInformation::Id, BridgedDeviceBasicInformation::Attributes::UniqueID::Id,
+              uniqueId);
+
     endpoint::door_lock::config_t cfg;
     cfg.door_lock.lock_type = chip::to_underlying(type);
     cfg.door_lock.lock_state = initialState;
     cfg.door_lock.actuator_enabled = true;
-    endpoint_t *ep = endpoint::door_lock::create(node, &cfg, ENDPOINT_FLAG_NONE, nullptr);
-    if (!ep) {
-        ESP_LOGE(TAG, "failed to create door lock endpoint");
+    if (endpoint::door_lock::add(ep, &cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "failed to add door lock to endpoint %u", endpoint::get_id(ep));
         return nullptr;
     }
     // The server reads AutoRelockTime after every unlock. 0 = disabled: the Nuki's own
@@ -255,15 +278,32 @@ namespace matter_lock {
 
 esp_err_t start()
 {
+    // Labels must stay valid until the attributes are stored, so keep them static.
+    static char bridgeLabel[] = CONFIG_NUKI_MATTER_BRIDGE_LABEL;
+    static char lockLabel[] = CONFIG_NUKI_MATTER_LOCK_LABEL;
+    static char lockUid[] = "nuki-" CONFIG_NUKI_DEVICE_NAME "-lock";
+
     node::config_t nodeConfig;
+    strncpy(nodeConfig.root_node.basic_information.node_label, bridgeLabel,
+            sizeof(nodeConfig.root_node.basic_information.node_label) - 1);
     node_t *node = node::create(&nodeConfig, onAttributeUpdate, onIdentify);
     if (!node) {
         ESP_LOGE(TAG, "failed to create node");
         return ESP_FAIL;
     }
 
-    // Main lock: endpoint 1. Created first so its ID stays stable.
-    endpoint_t *ep = createLockEndpoint(node, DoorLock::DlLockType::kDeadBolt, nullable<uint8_t>());
+    // Endpoint IDs are assigned in creation order (esp_matter only loads its persisted
+    // counter in esp_matter::start), so this order fixes: 1 = aggregator,
+    // 2 = lock, 3 = "Open". Keep it stable, controllers key on endpoint IDs.
+    endpoint::aggregator::config_t aggCfg;
+    endpoint_t *aggregator = endpoint::aggregator::create(node, &aggCfg, ENDPOINT_FLAG_NONE, nullptr);
+    if (!aggregator) {
+        ESP_LOGE(TAG, "failed to create aggregator");
+        return ESP_FAIL;
+    }
+
+    endpoint_t *ep = createLockEndpoint(node, aggregator, lockLabel, lockUid, DoorLock::DlLockType::kDeadBolt,
+                                        nullable<uint8_t>());
     if (!ep) {
         return ESP_FAIL;
     }
@@ -291,7 +331,9 @@ esp_err_t start()
     ESP_LOGI(TAG, "door lock on endpoint %u", s_lockEndpointId);
 
 #if CONFIG_NUKI_OPEN_ENDPOINT
-    endpoint_t *openEp = createLockEndpoint(node, DoorLock::DlLockType::kLatchBolt,
+    static char openLabel[] = CONFIG_NUKI_MATTER_OPEN_LABEL;
+    static char openUid[] = "nuki-" CONFIG_NUKI_DEVICE_NAME "-open";
+    endpoint_t *openEp = createLockEndpoint(node, aggregator, openLabel, openUid, DoorLock::DlLockType::kLatchBolt,
                                             nullable<uint8_t>(chip::to_underlying(DlLockState::kLocked)));
     if (!openEp) {
         return ESP_FAIL;

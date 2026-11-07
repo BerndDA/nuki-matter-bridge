@@ -16,8 +16,13 @@ control on its own endpoint for opening the door.
 
 ## Option A: second lock endpoint "Front door – Open" (implemented)
 
-Implemented in `main/matter_lock.cpp` as endpoint 2 (`CONFIG_NUKI_OPEN_ENDPOINT`, default on,
-requires Unbolting off). It shows Unlocked for 3 s once the Nuki has unlatched, and also when
+Implemented in `main/matter_lock.cpp` (`CONFIG_NUKI_OPEN_ENDPOINT`, default on, requires
+Unbolting off).
+
+Device layout: the node is a Matter bridge. Endpoint 1 is the aggregator, endpoint 2 the lock
+("Front door"), endpoint 3 the opener ("Door opener"). Both locks are bridged devices with a
+NodeLabel, because Apple Home ignores endpoint labels (FixedLabel) and would otherwise show every
+endpoint as "Matter Accessory". The names come from `CONFIG_NUKI_MATTER_*_LABEL`. It shows Unlocked for 3 s once the Nuki has unlatched, and also when
 the door is opened from the Nuki app. If no unlatch is seen within 30 s, it falls back to Locked.
 
 - Second Door Lock endpoint. Its `UnlockDoor` sends `Unlatch` to the Nuki. Afterwards it

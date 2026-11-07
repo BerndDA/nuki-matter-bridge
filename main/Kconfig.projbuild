@@ -47,6 +47,27 @@ menu "Nuki Matter Bridge"
             Being a lock, controllers ask for authentication (Face ID/passcode)
             like for the main lock. See docs/open-door-control.md.
 
+    config NUKI_MATTER_BRIDGE_LABEL
+        string "Name of the bridge in Matter controllers"
+        default "Nuki Bridge"
+        help
+            Basic Information NodeLabel of the bridge (max. 32 characters).
+
+    config NUKI_MATTER_LOCK_LABEL
+        string "Name of the lock in Matter controllers"
+        default "Front door"
+        help
+            NodeLabel of the bridged lock; Apple Home uses it as the accessory name
+            (max. 32 characters). Can still be renamed in the controller.
+
+    config NUKI_MATTER_OPEN_LABEL
+        string "Name of the 'Open' lock in Matter controllers"
+        default "Door opener"
+        depends on NUKI_OPEN_ENDPOINT
+        help
+            NodeLabel of the unlatch lock (max. 32 characters). Keep it clearly
+            different from the lock's name so Siri doesn't confuse the two.
+
     config NUKI_DOOR_SENSOR
         bool "Expose the Nuki door sensor (Matter DoorState)"
         default n
