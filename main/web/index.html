@@ -20,8 +20,9 @@
          font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   main { padding: 16px; }
   /* Cards flow into columns on wide screens; the log spans the full width. */
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
-          gap: 12px; align-items: start; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: start; }
+  @media (min-width: 900px) { .grid { grid-template-columns: 1fr 1fr; } }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .grid > .card { margin-bottom: 0; }
   .wide { grid-column: 1 / -1; }
   header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 4px 0 16px; }
@@ -107,6 +108,15 @@
       <dt>Last reset</dt><dd id="reset">–</dd>
       <dt>Free heap</dt><dd id="heap">–</dd>
     </dl>
+  </section>
+
+  <section class="card">
+    <h2>Tasks · free stack</h2>
+    <table>
+      <thead><tr><th>Task</th><th class="num">Free (never used)</th></tr></thead>
+      <tbody id="stacks"><tr><td colspan="2">–</td></tr></tbody>
+    </table>
+    <div class="loghint">Lowest free stack since boot. Below ~1 KB is tight.</div>
   </section>
 
   <section class="card">
@@ -201,6 +211,11 @@ function render(s) {
   txt('slot', y.partition + (y.otherPartition ? ` (${y.otherPartition}: ${y.otherPartitionState})` : ''));
   txt('uptime', duration(y.uptimeS));
   txt('reset', y.resetReason);
+  const stacks = Object.entries(y.stackFree || {}).sort((a, b) => a[1] - b[1]);
+  $('stacks').innerHTML = stacks.length ? stacks.map(([name, free]) => {
+    const cls = free < 768 ? 'bad' : free < 1536 ? 'warn' : '';
+    return `<tr><td><code>${esc(name)}</code></td><td class="num ${cls}">${(free / 1024).toFixed(1)} KB</td></tr>`;
+  }).join('') : '<tr><td colspan="2">–</td></tr>';
   txt('heap', `${(y.heapFree / 1024).toFixed(1)} KB (lowest ${(y.heapMin / 1024).toFixed(1)} KB, ` +
               `largest block ${(y.heapLargestBlock / 1024).toFixed(1)} KB)` +
               (y.allocFailures ? ` · ${y.allocFailures} failed allocations (last ${y.lastAllocFailSize} B)` : ''));
