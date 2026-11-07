@@ -201,7 +201,9 @@ esp_err_t start()
 #if CONFIG_NUKI_DOOR_SENSOR
     cluster::door_lock::feature::door_position_sensor::add(lockCluster);
 #endif
-    (void)lockCluster;
+    // The server reads AutoRelockTime after every unlock. 0 = disabled: the Nuki's own
+    // auto-lock (configured in the Nuki app) handles relocking.
+    cluster::door_lock::attribute::create_auto_relock_time(lockCluster, 0);
 
     // Battery reporting
     cluster::power_source::config_t psConfig;
