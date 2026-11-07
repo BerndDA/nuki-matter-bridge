@@ -1,6 +1,6 @@
 // Small status / maintenance web page on port 80 (no login, LAN only).
 //
-//   GET  /                         page (main/web/index.html, embedded)
+//   GET  /                         page (main/web/index.html, gzipped at build time)
 //   GET  /api/status               JSON status
 //   POST /api/restart              reboot
 //   POST /api/commissioning        open the Matter pairing window for 5 min
@@ -37,8 +37,9 @@
 
 static const char *TAG = "web";
 
-extern const char index_html_start[] asm("_binary_index_html_start");
-extern const char index_html_end[] asm("_binary_index_html_end");
+// Gzipped at build time (main/CMakeLists.txt); every current browser accepts gzip.
+extern const char index_html_gz_start[] asm("_binary_index_html_gz_start");
+extern const char index_html_gz_end[] asm("_binary_index_html_gz_end");
 
 namespace web_ui {
 namespace {
@@ -293,7 +294,8 @@ bool checkCsrf(httpd_req_t *req)
 esp_err_t handleIndex(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
-    return httpd_resp_send(req, index_html_start, index_html_end - index_html_start);
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    return httpd_resp_send(req, index_html_gz_start, index_html_gz_end - index_html_gz_start);
 }
 
 esp_err_t handleStatus(httpd_req_t *req)
