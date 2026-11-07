@@ -19,6 +19,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }  /* else display: flex/inline-flex below would win */
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   main { max-width: 1400px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
@@ -32,7 +33,10 @@
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 3px 10px;
           border-radius: 99px; background: var(--card); border: 1px solid var(--line); color: var(--muted); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+  .chip.ok { color: var(--text); } .chip.ok .dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+  .chip.bad { color: var(--bad); } .chip.bad .dot { background: var(--bad); }
+  .chip.sim { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
 
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px;
           box-shadow: var(--shadow); min-width: 0; }
@@ -121,7 +125,7 @@
     </div>
     <div class="chips">
       <span class="chip" id="chipConn"><span class="dot"></span><span>connecting…</span></span>
-      <span class="chip" id="chipSim" hidden>simulation</span>
+      <span class="chip sim" id="chipSim" hidden>simulation</span>
       <span class="chip" id="chipFw">–</span>
     </div>
   </header>
