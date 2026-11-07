@@ -89,6 +89,7 @@
     <h2>System</h2>
     <dl>
       <dt>Firmware</dt><dd id="fw">–</dd>
+      <dt>Firmware slot</dt><dd id="slot">–</dd>
       <dt>Uptime</dt><dd id="uptime">–</dd>
       <dt>Last reset</dt><dd id="reset">–</dd>
       <dt>Free heap</dt><dd id="heap">–</dd>
@@ -169,6 +170,7 @@ function render(s) {
 
   const y = s.system;
   txt('fw', `${y.version} (built ${y.built})`);
+  txt('slot', y.partition);
   txt('uptime', duration(y.uptimeS));
   txt('reset', y.resetReason);
   txt('heap', `${(y.heapFree / 1024).toFixed(1)} KB (lowest ${(y.heapMin / 1024).toFixed(1)} KB)`);
