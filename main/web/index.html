@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nuki Matter Bridge</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --text: #1d1f23; --muted: #6b7079; --line: #e3e5e8;
+    --ok: #1f8a4c; --warn: #b26b00; --bad: #c62828; --accent: #2f6fdf;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15171a; --card: #1f2226; --text: #e8eaed; --muted: #9aa0a8; --line: #2e3238;
+      --ok: #4cc27f; --warn: #e0a040; --bad: #ef6b6b; --accent: #6d9ff0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 4px 0 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  #updated { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 14px 16px; margin-bottom: 12px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; overflow-wrap: anywhere; }
+  .big { font-size: 22px; font-weight: 600; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px;
+           border: 1px solid currentColor; margin-left: 6px; vertical-align: 2px; }
+  code { font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 6px 4px; border-top: 1px solid var(--line); font-size: 14px; }
+  th { color: var(--muted); font-weight: 500; border-top: 0; }
+  .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+  button { font: inherit; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--bg); color: var(--text); cursor: pointer; text-align: left; }
+  button:hover { border-color: var(--accent); }
+  button.danger { color: var(--bad); }
+  button small { display: block; color: var(--muted); font-size: 12px; }
+  #msg { min-height: 1.4em; margin-top: 10px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Nuki Matter Bridge</h1>
+    <span id="updated">loading…</span>
+  </header>
+
+  <section class="card">
+    <h2>Lock</h2>
+    <div id="lock" class="big">–</div>
+    <dl style="margin-top:10px">
+      <dt>Battery</dt><dd id="battery">–</dd>
+      <dt>Door</dt><dd id="door">–</dd>
+      <dt>Nuki</dt><dd id="nuki">–</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Matter</h2>
+    <dl>
+      <dt>Pairing window</dt><dd id="window">–</dd>
+      <dt>Setup code</dt><dd id="manual">–</dd>
+      <dt>QR payload</dt><dd id="qr">–</dd>
+    </dl>
+    <table style="margin-top:12px">
+      <thead><tr><th>#</th><th>Controller</th><th>Node ID</th></tr></thead>
+      <tbody id="fabrics"><tr><td colspan="3">–</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Wi-Fi</h2>
+    <dl>
+      <dt>Network</dt><dd id="ssid">–</dd>
+      <dt>Signal</dt><dd id="rssi">–</dd>
+      <dt>IP / MAC</dt><dd id="ip">–</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>System</h2>
+    <dl>
+      <dt>Firmware</dt><dd id="fw">–</dd>
+      <dt>Uptime</dt><dd id="uptime">–</dd>
+      <dt>Last reset</dt><dd id="reset">–</dd>
+      <dt>Free heap</dt><dd id="heap">–</dd>
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>Maintenance</h2>
+    <div class="actions">
+      <button data-api="restart" data-confirm="Restart the bridge?">Restart
+        <small>Reboots the ESP32</small></button>
+      <button data-api="commissioning">Open pairing window
+        <small>Add another Matter controller (5 min)</small></button>
+      <button class="danger" data-api="nuki-unpair"
+        data-confirm="Remove the pairing with the Nuki lock? The bridge can't control the lock until it is paired again.">
+        Unpair Nuki<small>Forget the lock's credentials</small></button>
+      <button class="danger" data-api="matter-reset"
+        data-confirm="Matter factory reset: removes the bridge from ALL controllers (Apple Home, …) and forgets Wi-Fi. Continue?">
+        Matter factory reset<small>Removes controllers and Wi-Fi</small></button>
+    </div>
+    <div id="msg"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const txt = (id, v) => { $(id).textContent = v; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+const LOCK = {
+  locked: ['Locked', 'ok'], unlocked: ['Unlocked', 'warn'], unlatched: ['Door opened', 'warn'],
+  locking: ['Locking…', ''], unlocking: ['Unlocking…', ''], jammed: ['Jammed', 'bad'],
+  uncalibrated: ['Not calibrated', 'bad'], unknown: ['Unknown', 'muted'],
+};
+
+function duration(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return (d ? d + 'd ' : '') + (d || h ? h + 'h ' : '') + m + 'min';
+}
+
+function signal(rssi) {
+  const q = rssi >= -60 ? ['good', 'ok'] : rssi >= -72 ? ['fair', 'warn'] : ['weak', 'bad'];
+  return `${rssi} dBm <span class="badge ${q[1]}">${q[0]}</span>`;
+}
+
+function render(s) {
+  const l = s.lock;
+  if (l.valid) {
+    const [label, cls] = LOCK[l.state] || LOCK.unknown;
+    $('lock').innerHTML = `<span class="${cls}">${label}</span>`;
+    $('battery').innerHTML = `${l.battery}%` + (l.batteryCritical ? ' <span class="badge bad">critical</span>' : '');
+    txt('door', l.door);
+  } else {
+    $('lock').innerHTML = '<span class="warn">No status yet</span>';
+    txt('battery', '–'); txt('door', '–');
+  }
+  $('nuki').innerHTML = esc(s.nuki.name) +
+    (s.nuki.paired ? ' <span class="badge ok">paired</span>' : ' <span class="badge bad">not paired</span>') +
+    (s.system.simulation ? ' <span class="badge warn">simulation</span>' : '');
+
+  const m = s.matter;
+  $('window').innerHTML = m.commissioningOpen ? '<span class="ok">open</span>' : 'closed';
+  txt('manual', m.manual ? m.manual.replace(/^(\d{4})(\d{3})(\d{4})$/, '$1-$2-$3') : '–');
+  $('qr').innerHTML = m.qr
+    ? `<code>${esc(m.qr)}</code> · <a target="_blank" rel="noopener"
+         href="https://project-chip.github.io/connectedhomeip/qrcode.html?data=${encodeURIComponent(m.qr)}">show QR</a>`
+    : '–';
+  $('fabrics').innerHTML = m.fabrics.length
+    ? m.fabrics.map(f => `<tr><td>${f.index}</td>
+        <td>${esc(f.vendor || 'Vendor 0x' + f.vendorId.toString(16).toUpperCase())}${f.label ? ' · ' + esc(f.label) : ''}</td>
+        <td><code>${f.nodeId}</code></td></tr>`).join('')
+    : '<tr><td colspan="3">No controllers. Bridge is not paired.</td></tr>';
+
+  const w = s.wifi;
+  $('ssid').innerHTML = w.connected ? esc(w.ssid) + ` <span class="badge">ch ${w.channel}</span>` : '<span class="bad">disconnected</span>';
+  $('rssi').innerHTML = w.connected ? signal(w.rssi) : '–';
+  txt('ip', `${w.ip || '–'} / ${w.mac || '–'}`);
+
+  const y = s.system;
+  txt('fw', `${y.version} (built ${y.built})`);
+  txt('uptime', duration(y.uptimeS));
+  txt('reset', y.resetReason);
+  txt('heap', `${(y.heapFree / 1024).toFixed(1)} KB (lowest ${(y.heapMin / 1024).toFixed(1)} KB)`);
+}
+
+let failures = 0;
+let lastUptime = 0;
+let restartUptime = null;  // set while waiting for the bridge to come back after a restart
+let msgTimer = null;
+
+function message(html, clearAfterMs) {
+  clearTimeout(msgTimer);
+  $('msg').innerHTML = html;
+  if (clearAfterMs) msgTimer = setTimeout(() => { $('msg').innerHTML = ''; }, clearAfterMs);
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/api/status', { cache: 'no-store' });
+    const s = await r.json();
+    render(s);
+    // A smaller uptime than before the restart means the bridge has rebooted.
+    if (restartUptime !== null && s.system.uptimeS < restartUptime) {
+      restartUptime = null;
+      message('<span class="ok">Bridge is back online</span>', 5000);
+    }
+    lastUptime = s.system.uptimeS;
+    failures = 0;
+    txt('updated', 'updated ' + new Date().toLocaleTimeString());
+  } catch (e) {
+    if (++failures > 1) $('updated').innerHTML = '<span class="bad">bridge not reachable</span>';
+  }
+}
+
+document.querySelectorAll('button[data-api]').forEach(b => b.addEventListener('click', async () => {
+  if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
+  message('…');
+  try {
+    const r = await fetch('/api/' + b.dataset.api, { method: 'POST', headers: { 'X-Requested-With': 'nuki-web' } });
+    const j = await r.json();
+    if (j.ok && b.dataset.api === 'restart') {
+      restartUptime = lastUptime;  // any later reply with a smaller uptime comes after the reboot
+      message('Restarting… waiting for the bridge');
+    } else if (j.ok && b.dataset.api === 'matter-reset') {
+      message(`<span class="warn">${esc(j.message)}</span>`);  // stays: the bridge won't be back on Wi-Fi by itself
+    } else {
+      message(`<span class="${j.ok ? 'ok' : 'bad'}">${esc(j.message)}</span>`, 8000);
+    }
+  } catch (e) {
+    message('<span class="bad">Request failed</span>', 8000);
+  }
+  setTimeout(refresh, 1000);
+}));
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

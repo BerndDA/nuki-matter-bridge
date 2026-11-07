@@ -14,6 +14,7 @@
 
 #include "matter_lock.h"
 #include "nuki_bridge.h"
+#include "web_ui.h"
 
 static const char *TAG = "app";
 
@@ -57,6 +58,7 @@ extern "C" void app_main()
     }
 
     nuki_bridge::start(matter_lock::publishStatus);
+    web_ui::start();
 
 #if CONFIG_NUKI_RESET_GPIO >= 0
     xTaskCreate(resetButtonTask, "reset_btn", 3072, nullptr, 2, nullptr);

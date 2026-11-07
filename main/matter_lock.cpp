@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include <esp_log.h>
+#include <esp_netif.h>
 #include <esp_matter.h>
 
 #include <app/clusters/door-lock-server/door-lock-server.h>
@@ -12,6 +13,7 @@
 #include <platform/CHIPDeviceLayer.h>
 #include <setup_payload/OnboardingCodesUtil.h>
 
+#include "chip_lock.h"
 #include "nuki_bridge.h"
 #include "wifi_setup.h"
 
@@ -24,6 +26,13 @@ using chip::app::DataModel::Nullable;
 namespace {
 
 uint16_t s_lockEndpointId = 0;
+
+// Copy of the last reported status for the web UI (written by the Nuki task).
+portMUX_TYPE s_snapshotMux = portMUX_INITIALIZER_UNLOCKED;
+BridgeStatus s_snapshot;
+bool s_haveSnapshot = false;
+
+constexpr auto kCommissioningWindowTimeout = chip::System::Clock::Seconds16(300);
 BridgeLockState s_lastLockState = BridgeLockState::Unknown;
 
 #if CONFIG_NUKI_OPEN_ENDPOINT
@@ -63,6 +72,12 @@ void onDeviceEvent(const ChipDeviceEvent *event, intptr_t)
         break;
     case chip::DeviceLayer::DeviceEventType::kInterfaceIpAddressChanged:
         ESP_LOGI(TAG, "IP address changed");
+        if (esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF")) {
+            esp_netif_ip_info_t ip = {};
+            if (esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+                ESP_LOGI(TAG, "web UI: http://" IPSTR "/", IP2STR(&ip.ip));
+            }
+        }
         break;
     case chip::DeviceLayer::DeviceEventType::kFabricRemoved:
         // Last controller removed: re-open the commissioning window (over DNS-SD,
@@ -70,7 +85,7 @@ void onDeviceEvent(const ChipDeviceEvent *event, intptr_t)
         if (chip::Server::GetInstance().GetFabricTable().FabricCount() == 0) {
             auto &mgr = chip::Server::GetInstance().GetCommissioningWindowManager();
             if (!mgr.IsCommissioningWindowOpen()) {
-                mgr.OpenBasicCommissioningWindow(chip::System::Clock::Seconds16(300),
+                mgr.OpenBasicCommissioningWindow(kCommissioningWindowTimeout,
                                                  chip::CommissioningWindowAdvertisement::kDnssdOnly);
             }
         }
@@ -357,11 +372,42 @@ esp_err_t start()
 
 void publishStatus(const BridgeStatus &status)
 {
+    taskENTER_CRITICAL(&s_snapshotMux);
+    s_snapshot = status;
+    s_haveSnapshot = true;
+    taskEXIT_CRITICAL(&s_snapshotMux);
+
     auto *copy = new BridgeStatus(status);
     if (chip::DeviceLayer::PlatformMgr().ScheduleWork(applyStatusWork, reinterpret_cast<intptr_t>(copy)) !=
         CHIP_NO_ERROR) {
         delete copy;
     }
+}
+
+bool lastStatus(BridgeStatus &out)
+{
+    taskENTER_CRITICAL(&s_snapshotMux);
+    out = s_snapshot;
+    bool have = s_haveSnapshot;
+    taskEXIT_CRITICAL(&s_snapshotMux);
+    return have;
+}
+
+esp_err_t openCommissioningWindow()
+{
+    ChipLock lock;
+    auto &mgr = chip::Server::GetInstance().GetCommissioningWindowManager();
+    if (mgr.IsCommissioningWindowOpen()) {
+        return ESP_OK;
+    }
+    CHIP_ERROR err = mgr.OpenBasicCommissioningWindow(kCommissioningWindowTimeout,
+                                                      chip::CommissioningWindowAdvertisement::kDnssdOnly);
+    if (err != CHIP_NO_ERROR) {
+        ESP_LOGE(TAG, "opening commissioning window failed: %" CHIP_ERROR_FORMAT, err.Format());
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "commissioning window opened");
+    return ESP_OK;
 }
 
 void factoryReset()
