@@ -9,6 +9,7 @@ idf_component_register(
         "web_ui.cpp"
         "wifi_setup.cpp"
     INCLUDE_DIRS "."
+    EMBED_FILES "web/favicon.ico"
     REQUIRES nuki_ble nvs_flash esp_wifi esp_netif esp_http_server esp_app_format app_update driver)
 
 # Web page: gzip at build time and embed the .gz; the server sends it with
