@@ -103,10 +103,12 @@ menu "Nuki Matter Bridge"
 
     config NUKI_RESET_GPIO
         int "GPIO of a button for unpair/factory reset (-1 = disabled)"
+        default 9 if IDF_TARGET_ESP32C3
         default 0
         help
             Hold for 10 s: unpair from the Nuki lock and factory-reset Matter.
-            GPIO0 is the BOOT button on most dev boards.
+            The default is the BOOT button of common dev boards: GPIO0 on the ESP32,
+            GPIO9 on the ESP32-C3.
 
     config NUKI_SIMULATE
         bool "Simulate the Nuki lock (no BLE)"
