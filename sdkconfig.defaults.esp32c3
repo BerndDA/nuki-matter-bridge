@@ -1,0 +1,17 @@
+# ESP32-C3 overrides, applied on top of sdkconfig.defaults (ESP-IDF loads this file for esp32c3).
+#
+# On the C3, IRAM and DRAM are the same 400 KB: every function placed in IRAM is taken from the
+# heap. With Wi-Fi + BLE + Matter, the stock layout left ~25 KB free (minimum ~8 KB), and an OTA
+# upload exhausted it (TCP stopped accepting connections). So: code to flash, smaller BLE pools.
+
+# Wi-Fi hot paths in flash instead of IRAM (~10 KB + ~17 KB; costs some peak throughput)
+CONFIG_ESP_WIFI_IRAM_OPT=n
+CONFIG_ESP_WIFI_RX_IRAM_OPT=n
+
+# BLE controller: scanning + one connection to the lock (default reserves 6 activities)
+CONFIG_BT_CTRL_BLE_MAX_ACT=3
+
+# NimBLE host pools: one connection, small GATT payloads
+CONFIG_BT_NIMBLE_ACL_BUF_COUNT=12
+CONFIG_BT_NIMBLE_HCI_EVT_HI_BUF_COUNT=20
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=12

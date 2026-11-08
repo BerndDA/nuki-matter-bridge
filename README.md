@@ -26,6 +26,7 @@ Nuki lock  ──BLE──▶  ESP32 (this firmware)  ──Wi‑Fi / Matter─�
 
 - A classic **ESP32** dev board (WROOM/WROVER) with **4 MB flash**, placed within BLE range of the lock.
 - Tested with a Nuki Smart Lock (hardware 8.3, firmware 4.10.5).
+- **ESP32-C3** (4 MB flash) works too: build with `make TARGET=esp32c3`. Matter, the web UI and OTA are tested; pairing with a lock on the C3 isn't yet. C3-specific memory settings are in `sdkconfig.defaults.esp32c3`.
 - Other ESP32 variants aren't supported yet.
 
 ## Build
